@@ -85,7 +85,7 @@ export default function Home() {
     return (
       <main className="flex min-h-[100dvh] flex-col items-center justify-center p-6">
         <div className="w-full max-w-sm">
-          <h1 className="mb-2 text-center text-2xl font-bold text-gray-800">アンキシム 在庫管理</h1>
+          <h1 className="mb-2 text-center text-2xl font-bold text-gray-800">アンキシム 在庫管理 ★</h1>
           <p className="mb-8 text-center text-sm text-gray-500">店舗または本部のアカウントでログイン</p>
           <form onSubmit={handleLogin} className="flex flex-col gap-3">
             <input
@@ -123,7 +123,7 @@ export default function Home() {
   return (
     <main className="flex min-h-[100dvh] flex-col items-center justify-center p-6">
       <div className="w-full max-w-sm">
-        <h1 className="mb-2 text-center text-2xl font-bold text-gray-800">アンキシム 在庫管理</h1>
+        <h1 className="mb-2 text-center text-2xl font-bold text-gray-800">アンキシム 在庫管理 ★</h1>
         <p className="mb-8 text-center text-sm text-gray-500">本部：確認する店舗を選択</p>
         <div className="flex flex-col gap-3">
           {stores.map((store) => (
