@@ -187,7 +187,7 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
   const load = useCallback(async () => {
     const [productResult, assignmentResult, itemResult, reservationResult] = await Promise.all([
       fetchAll((start, end) => supabase.from('products').select('id, category_id, brand, name, sale_price')
-        .eq('is_active', true).eq('product_type', 'retail').order('id').range(start, end)),
+        .eq('is_active', true).or('product_type.eq.retail,name.eq.その他').order('id').range(start, end)),
       fetchAll((start, end) => supabase.from('store_products').select('store_id, product_id, sort_order')
         .eq('is_active', true).order('store_id').order('product_id').range(start, end)),
       supabase.from('presale_items').select('*').eq('campaign_id', campaign.id),
