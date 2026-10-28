@@ -5,7 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetchAll'
 import { yen } from '@/lib/tax'
 import {
-  discountLabel, priceOrder, regularPriceWithTax, todayInTokyo,
+  discountLabel, looksLikeDevice, priceOrder, regularPriceWithTax, todayInTokyo,
   type BulkTier, type PortalAccess, type PresaleCampaign, type PresaleItemWithProduct, type PresaleOrder, type Staff, type StaffGoal,
 } from '@/lib/presale'
 
@@ -79,6 +79,9 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
   // 予約の各行の商品検索（行番号ごと）
   const [lineSearch, setLineSearch] = useState<Record<number, string>>({})
   const [onlyOpen, setOnlyOpen] = useState(false)
+  // 一覧にない商品（臨時）の入力。line は入れる行（null は行を足して入れる）
+  const [tempForm, setTempForm] = useState<{ line: number | null; name: string; price: string; device: boolean } | null>(null)
+  const [tempSaving, setTempSaving] = useState(false)
   const [saving, setSaving] = useState(false)
   const [busyId, setBusyId] = useState('')
   const [message, setMessage] = useState('')
@@ -234,6 +237,38 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
     setDraft((previous) => ({ ...emptyDraft(storeId), store_id: previous.store_id, reserved_on: previous.reserved_on, staff_id: previous.staff_id }))
     setLineSearch({})
     await load()
+  }
+
+  function openTempForm(line: number | null, name: string) {
+    setTempForm({ line, name, price: '', device: looksLikeDevice(name.trim()) })
+    setError('')
+  }
+
+  // 一覧にない商品を、商品名と税込の金額だけで追加する。この企画の中だけで全店舗の商品選びに出る
+  async function addTempItem() {
+    if (!tempForm) return
+    const name = tempForm.name.trim()
+    const price = Number.parseInt(tempForm.price.normalize('NFKC').replace(/[,円¥\s]/g, ''), 10)
+    if (!draft.store_id) { setError('店舗を選んでください。'); return }
+    if (!name) { setError('商品名を入力してください。'); return }
+    if (!Number.isInteger(price) || price < 0) { setError('金額（税込）を数字で入力してください。'); return }
+    setTempSaving(true)
+    setError('')
+    const { data, error: rpcError } = await supabase.rpc('add_presale_temp_item', {
+      p_store_id: draft.store_id, ...rpcAccess, p_campaign_id: campaign.id, p_name: name, p_price: price, p_bulk_excluded: tempForm.device,
+    })
+    setTempSaving(false)
+    if (rpcError) { setError(rpcError.message); return }
+    const productId = String(data)
+    const target = tempForm.line
+    setTempForm(null)
+    await load()
+    setDraft((previous) => {
+      const index = target ?? previous.lines.findIndex((line) => !line.product_id)
+      if (index < 0) return { ...previous, lines: [...previous.lines, { product_id: productId, quantity: '1', discount_type: '', discount_value: '' }] }
+      return { ...previous, lines: previous.lines.map((line, i) => i === index ? { ...line, product_id: productId } : line) }
+    })
+    if (target !== null) setLineSearch((previous) => ({ ...previous, [target]: '' }))
   }
 
   // 「発注が必要」の付け外し
@@ -457,6 +492,10 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
                           {option.brand && <span className="text-gray-400">{option.brand} </span>}{option.name}
                         </button>
                       ))}
+                      <button onClick={() => openTempForm(index, (lineSearch[index] ?? '').trim())}
+                        className="block w-full px-3 py-2 text-left text-xs font-bold text-amber-700 hover:bg-amber-50">
+                        ＋「{(lineSearch[index] ?? '').trim()}」を一覧にない商品（臨時）として追加
+                      </button>
                     </div>
                   )
                 })()}
@@ -493,6 +532,39 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
           })}
           <button onClick={() => setDraft((previous) => ({ ...previous, lines: [...previous.lines, { product_id: '', quantity: '1', discount_type: '', discount_value: '' }] }))}
             className="w-full rounded-xl border border-dashed border-gray-300 py-2 text-sm text-gray-600">＋ 商品を追加</button>
+          {!tempForm && (
+            <button onClick={() => openTempForm(null, '')}
+              className="w-full rounded-xl border border-dashed border-amber-300 py-2 text-sm text-amber-700">＋ 一覧にない商品（臨時）を追加</button>
+          )}
+          {tempForm && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3">
+              <div className="text-sm font-bold text-amber-900">一覧にない商品（臨時）を追加</div>
+              <p className="mt-0.5 text-[11px] text-amber-800">追加した商品は、この先行予約の中だけで全店舗の商品選びに出ます。同じ名前の商品がすでにあれば、それを使います。在庫は動きません。</p>
+              <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_9rem]">
+                <label className="block text-xs font-medium text-gray-600">商品名
+                  <input value={tempForm.name} autoFocus
+                    onChange={(event) => setTempForm((previous) => previous && { ...previous, name: event.target.value, device: previous.device || looksLikeDevice(event.target.value.trim()) })}
+                    placeholder="例：〇〇 ヘアオイル 100ml"
+                    className="mt-1 block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-base" />
+                </label>
+                <label className="block text-xs font-medium text-gray-600">金額（税込・1個）
+                  <input inputMode="numeric" value={tempForm.price} onChange={(event) => setTempForm((previous) => previous && { ...previous, price: event.target.value })}
+                    placeholder="例：3300"
+                    className="mt-1 block w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-right text-base" />
+                </label>
+              </div>
+              <label className="mt-2 flex w-fit items-center gap-2 text-xs text-gray-700">
+                <input type="checkbox" checked={tempForm.device} onChange={(event) => setTempForm((previous) => previous && { ...previous, device: event.target.checked })} className="h-4 w-4" />
+                美容機器（まとめ買いの割引・個数に入れない）
+              </label>
+              <div className="mt-3 flex gap-2">
+                <button onClick={() => setTempForm(null)} className="flex-1 rounded-lg border border-gray-200 bg-white py-2 text-sm text-gray-600">やめる</button>
+                <button onClick={() => void addTempItem()} disabled={tempSaving} className="flex-1 rounded-lg bg-amber-500 py-2 text-sm font-bold text-white disabled:opacity-50">
+                  {tempSaving ? '追加中...' : '追加する'}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-3 flex flex-wrap items-end justify-between gap-2 rounded-xl bg-blue-50 px-4 py-3">

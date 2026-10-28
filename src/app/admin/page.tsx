@@ -833,7 +833,7 @@ export default function AdminPage() {
 
   useEffect(() => {
     if (!selectedCat || !authorized) return
-    supabase.from('products').select('*').eq('category_id', selectedCat).order('sort_order')
+    supabase.from('products').select('*').eq('category_id', selectedCat).is('presale_campaign_id', null).order('sort_order')
       .then(({ data }) => { if (data) setProducts(data) })
   }, [selectedCat, authorized])
 

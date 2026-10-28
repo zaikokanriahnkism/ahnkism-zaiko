@@ -173,7 +173,7 @@ export default function StaffPurchasesPage() {
       supabase.from('stores').select('id, name').order('sort_order'),
       // 過去の人（is_active = false）も名前の表示に使う。選択肢には今いる人だけ出す
       supabase.from('staff').select('id, store_id, name, sort_order, is_active').order('sort_order').order('id'),
-      fetchAll((from, to) => supabase.from('products').select('id, brand, name, cost_price, dealer').eq('is_active', true).order('id').range(from, to)),
+      fetchAll((from, to) => supabase.from('products').select('id, brand, name, cost_price, dealer').eq('is_active', true).is('presale_campaign_id', null).order('id').range(from, to)),
       fetchAll((from, to) => supabase.from('store_products').select('store_id, product_id').order('store_id').order('product_id').range(from, to)),
       fetchAll((from, to) => supabase.from('staff_purchases')
         .select('id, purchased_on, staff_id, store_id, legacy_name, source_ref, product_id, item_name, item_detail, dealer, quantity, unit_price, kind, deduct_stock, collected_on, handed_on, payout_id, batch_id, note')

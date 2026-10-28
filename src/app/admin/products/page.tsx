@@ -89,7 +89,7 @@ export default function ProductManagementPage() {
       supabase.from('stores').select('id, name').order('sort_order'),
       supabase.from('categories').select('id, name').order('sort_order'),
       fetchAll((start, end) => supabase.from('products').select('id, category_id, dealer, manufacturer, brand, name, is_active, usage_only')
-        .order('sort_order').order('id').range(start, end)),
+        .is('presale_campaign_id', null).order('sort_order').order('id').range(start, end)),
       fetchAll((start, end) => supabase.from('store_products').select('store_id, product_id, is_active')
         .order('store_id').order('product_id').range(start, end)),
     ])

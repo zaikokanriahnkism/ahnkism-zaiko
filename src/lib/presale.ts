@@ -24,6 +24,11 @@ export type PresaleItem = {
 
 export type PresaleItemWithProduct = PresaleItem & { brand: string | null; name: string; sale_price: number | null }
 
+// 美容機器はまとめ買いの個数に数えない（初期値。商品ごとに変えられる）
+export function looksLikeDevice(name: string) {
+  return /^(ReFa|ドライヤー|パワーストレート)/.test(name)
+}
+
 export type BulkTier = { campaign_id: number; min_qty: number; percent: number }
 
 export type Staff = { id: number; store_id: number; name: string; sort_order: number; is_active: boolean }

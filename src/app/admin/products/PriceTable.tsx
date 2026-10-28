@@ -46,7 +46,7 @@ export default function PriceTable({ categories }: { categories: Category[] }) {
   const reloadGenres = useCallback(async () => {
     const [genreResult, productResult] = await Promise.all([
       supabase.from('product_genres').select('id, name').order('sort_order').order('id'),
-      fetchAll((start, end) => supabase.from('products').select('id, genre_id').eq('is_active', true).order('id').range(start, end)),
+      fetchAll((start, end) => supabase.from('products').select('id, genre_id').eq('is_active', true).is('presale_campaign_id', null).order('id').range(start, end)),
     ])
     if (genreResult.data) setGenres(genreResult.data as Genre[])
     if (productResult.data) {
@@ -62,7 +62,7 @@ export default function PriceTable({ categories }: { categories: Category[] }) {
     void (async () => {
       const { data, error: loadError } = await fetchAll((start, end) => supabase.from('products')
         .select('id, category_id, brand, name, cost_price, sale_price, product_type, genre_id')
-        .eq('is_active', true)
+        .eq('is_active', true).is('presale_campaign_id', null)
         .order('sort_order').order('id')
         .range(start, end))
       const [genreResult, storeResult, assignmentResult] = await Promise.all([

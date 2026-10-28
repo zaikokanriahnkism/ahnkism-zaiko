@@ -11,22 +11,18 @@ import ReservationPanel from '@/components/presale/ReservationPanel'
 import ItemOrderSettings from './ItemOrderSettings'
 import NeedsOrderList from './NeedsOrderList'
 import {
-  discountedPrice, regularPriceWithTax,
+  discountedPrice, looksLikeDevice, regularPriceWithTax,
   type BulkTier, type DiscountType, type PresaleCampaign, type PresaleItem, type Staff, type StaffGoal,
 } from '@/lib/presale'
 
 type Store = { id: number; name: string }
 type Category = { id: number; name: string; sort_order: number }
-type RetailProduct = { id: number; category_id: number; brand: string | null; name: string; sale_price: number | null }
+// presale_campaign_id：予約の画面で追加した臨時の商品（その企画の中だけ）。null は通常の商品
+type RetailProduct = { id: number; category_id: number; brand: string | null; name: string; sale_price: number | null; presale_campaign_id: number | null }
 type Assignment = { store_id: number; product_id: number; sort_order: number }
 type Tab = 'items' | 'order' | 'reservations' | 'needs' | 'stock' | 'staff' | 'access'
 
 const TABS: [Tab, string][] = [['items', '対象商品と割引'], ['order', '店舗ごとの商品の並び'], ['reservations', '予約一覧'], ['needs', '発注が必要なもの'], ['stock', '集計・先行分の在庫'], ['staff', 'スタッフ名簿と目標'], ['access', '店舗の予約ページ']]
-
-// 美容機器はまとめ買いの個数に数えない（初期値。木村さんが商品ごとに変えられる）
-function looksLikeDevice(name: string) {
-  return /^(ReFa|ドライヤー|パワーストレート)/.test(name)
-}
 
 function normalize(value: string) {
   return value.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, '')
@@ -186,8 +182,9 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
 
   const load = useCallback(async () => {
     const [productResult, assignmentResult, itemResult, reservationResult] = await Promise.all([
-      fetchAll((start, end) => supabase.from('products').select('id, category_id, brand, name, sale_price')
-        .eq('is_active', true).eq('product_type', 'retail').order('id').range(start, end)),
+      fetchAll((start, end) => supabase.from('products').select('id, category_id, brand, name, sale_price, presale_campaign_id')
+        .eq('is_active', true).eq('product_type', 'retail').or(`presale_campaign_id.is.null,presale_campaign_id.eq.${campaign.id}`)
+        .order('id').range(start, end)),
       fetchAll((start, end) => supabase.from('store_products').select('store_id, product_id, sort_order')
         .eq('is_active', true).order('store_id').order('product_id').range(start, end)),
       supabase.from('presale_items').select('*').eq('campaign_id', campaign.id),
@@ -264,6 +261,17 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
     const { error: deleteError } = await supabase.from('presale_bulk_tiers').delete().eq('campaign_id', campaign.id).eq('min_qty', minQty)
     if (deleteError) { setError(deleteError.message); return }
     await load()
+  }
+
+  // 臨時の商品を通常の商品にする（商品の管理に出るようになる。店舗の取扱は商品の管理で設定）
+  async function makeRegular(product: RetailProduct) {
+    if (!confirm(`「${product.name}」を通常の商品にします。商品の管理に出るようになり、次回以降の先行予約でも対象に選べます。店舗で在庫を持つ場合は、商品の管理で取扱店舗を設定してください。よろしいですか？`)) return
+    setBusy(`r_${product.id}`)
+    setError('')
+    const { error: updateError } = await supabase.from('products').update({ presale_campaign_id: null }).eq('id', product.id)
+    setBusy('')
+    if (updateError) { setError(updateError.message); return }
+    setProducts((previous) => previous.map((item) => item.id === product.id ? { ...item, presale_campaign_id: null } : item))
   }
 
   async function saveDiscount(product: RetailProduct, patch: Partial<Pick<PresaleItem, 'discount_type' | 'discount_value' | 'bulk_excluded'>>) {
@@ -379,6 +387,13 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
                     <td className="px-3 py-1.5">
                       <div className="text-[10px] text-gray-400">{product.brand}</div>
                       <div className="break-words font-medium text-gray-700">{product.name}</div>
+                      {product.presale_campaign_id !== null && (
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">臨時（予約の画面で追加）</span>
+                          <button onClick={() => void makeRegular(product)} disabled={busy === `r_${product.id}`}
+                            className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px] text-gray-600">通常の商品にする</button>
+                        </div>
+                      )}
                     </td>
                     <td className="px-2 py-1.5">
                       <input inputMode="numeric" placeholder="未入力" value={drafts[`p_${product.id}`] ?? (regular === null ? '' : String(regular))}
