@@ -333,6 +333,20 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
     setItems((previous) => new Map(previous).set(product.id, { ...item, hidden_store_ids: next }))
   }
 
+  // 間違えて作った臨時の商品を消す（予約が入っていない場合だけ）
+  async function deleteTemp(product: RetailProduct) {
+    if (reservedIds.has(product.id)) { setError(`「${product.name}」は予約が入っているので消せません。名前を直すか、予約の商品を入れ替えてから消してください。`); return }
+    if (!confirm(`臨時の商品「${product.name}」を消します。よろしいですか？`)) return
+    setBusy(`x_${product.id}`)
+    setError('')
+    const { error: itemError } = await supabase.from('presale_items').delete().eq('campaign_id', campaign.id).eq('product_id', product.id)
+    const { error: productError } = itemError ? { error: itemError } : await supabase.from('products').delete().eq('id', product.id)
+    setBusy('')
+    if (productError) { setError(productError.message); return }
+    setProducts((previous) => previous.filter((item) => item.id !== product.id))
+    await load()
+  }
+
   // 臨時の商品は名前をここで直せる（予約の画面にも直した名前で出る）
   async function saveName(product: RetailProduct) {
     const key = `n_${product.id}`
@@ -461,6 +475,8 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
                           <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">臨時（予約の画面で追加・名前と価格はここで直せます）</span>
                           <button onClick={() => void makeRegular(product)} disabled={busy === `r_${product.id}`}
                             className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px] text-gray-600">通常の商品にする</button>
+                          <button onClick={() => void deleteTemp(product)} disabled={busy === `x_${product.id}`}
+                            className="rounded border border-red-200 bg-white px-1.5 py-0.5 text-[10px] text-red-600">消す</button>
                         </div>
                       )}
                     </td>
