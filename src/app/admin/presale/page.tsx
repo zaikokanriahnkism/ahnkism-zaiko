@@ -333,6 +333,22 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
     setItems((previous) => new Map(previous).set(product.id, { ...item, hidden_store_ids: next }))
   }
 
+  // 臨時の商品は名前をここで直せる（予約の画面にも直した名前で出る）
+  async function saveName(product: RetailProduct) {
+    const key = `n_${product.id}`
+    const raw = drafts[key]
+    if (raw === undefined) return
+    const name = raw.trim().replace(/\s+/g, ' ')
+    if (!name) { setError('商品名を入力してください。'); return }
+    if (name === product.name) { setDrafts((previous) => { const next = { ...previous }; delete next[key]; return next }); return }
+    setBusy(key)
+    const { error: updateError } = await supabase.from('products').update({ name }).eq('id', product.id)
+    setBusy('')
+    if (updateError) { setError(updateError.message); return }
+    setProducts((previous) => previous.map((item) => item.id === product.id ? { ...item, name } : item))
+    setDrafts((previous) => { const next = { ...previous }; delete next[key]; return next })
+  }
+
   async function savePrice(product: RetailProduct) {
     const key = `p_${product.id}`
     const raw = drafts[key]
@@ -432,10 +448,17 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
                     </td>
                     <td className="px-3 py-1.5">
                       <div className="text-[10px] text-gray-400">{product.brand}</div>
-                      <div className="break-words font-medium text-gray-700">{product.name}</div>
+                      {product.presale_campaign_id === null ? (
+                        <div className="break-words font-medium text-gray-700">{product.name}</div>
+                      ) : (
+                        <input value={drafts[`n_${product.id}`] ?? product.name} aria-label="商品名"
+                          onChange={(event) => setDrafts((previous) => ({ ...previous, [`n_${product.id}`]: event.target.value }))}
+                          onBlur={() => void saveName(product)} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
+                          className="w-full rounded-md border border-amber-200 bg-white px-2 py-1 text-base font-medium text-gray-700" />
+                      )}
                       {product.presale_campaign_id !== null && (
                         <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">臨時（予約の画面で追加）</span>
+                          <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800">臨時（予約の画面で追加・名前と価格はここで直せます）</span>
                           <button onClick={() => void makeRegular(product)} disabled={busy === `r_${product.id}`}
                             className="rounded border border-gray-300 bg-white px-1.5 py-0.5 text-[10px] text-gray-600">通常の商品にする</button>
                         </div>
