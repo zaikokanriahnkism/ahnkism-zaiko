@@ -244,6 +244,41 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
     await load()
   }
 
+  // グループ（categoryId が null なら全部）の商品をまとめて対象にする。価格が入っていない商品は予約で選べないので飛ばす
+  async function selectAll(categoryId: number | null) {
+    const group = products.filter((product) => categoryId === null || product.category_id === categoryId)
+    const targets = group.filter((product) => !items.has(product.id) && product.sale_price !== null)
+    const noPrice = group.filter((product) => !items.has(product.id) && product.sale_price === null)
+    const label = categoryId === null ? '全部' : `「${categoryName.get(categoryId)}」`
+    if (targets.length === 0) { setError(noPrice.length ? `${label}の残りは価格が入っていない商品だけです（${noPrice.map((product) => product.name).join('、')}）。` : `${label}の商品はすでに全部対象です。`); return }
+    if (!confirm(`${label}の商品${targets.length}件を対象にします。${noPrice.length ? `\n価格が入っていない${noPrice.length}件は飛ばします。` : ''}\n要らない商品は、あとでチェックを外してください。よろしいですか？`)) return
+    setBusy('bulk')
+    setError('')
+    const { error: insertError } = await supabase.from('presale_items').insert(targets.map((product) => ({
+      campaign_id: campaign.id, product_id: product.id, discount_type: 'percent', discount_value: 0, bulk_excluded: looksLikeDevice(product.name),
+    })))
+    setBusy('')
+    if (insertError) setError(insertError.message)
+    else if (noPrice.length) setError(`価格が入っていないため飛ばした商品：${noPrice.map((product) => product.name).join('、')}`)
+    await load()
+  }
+
+  // グループの対象をまとめて外す。予約が入っている商品は外さない
+  async function clearAll(categoryId: number | null) {
+    const group = products.filter((product) => (categoryId === null || product.category_id === categoryId) && items.has(product.id))
+    const targets = group.filter((product) => !reservedIds.has(product.id))
+    const kept = group.length - targets.length
+    const label = categoryId === null ? '全部' : `「${categoryName.get(categoryId)}」`
+    if (targets.length === 0) { setError(kept ? `${label}の対象は、どれも予約が入っているので外せません。` : `${label}に対象の商品はありません。`); return }
+    if (!confirm(`${label}の対象${targets.length}件を外します。${kept ? `\n予約が入っている${kept}件は外しません。` : ''}\n割引の設定も消えます。よろしいですか？`)) return
+    setBusy('bulk')
+    setError('')
+    const { error: deleteError } = await supabase.from('presale_items').delete().eq('campaign_id', campaign.id).in('product_id', targets.map((product) => product.id))
+    setBusy('')
+    if (deleteError) setError(deleteError.message)
+    await load()
+  }
+
   async function addTier() {
     const minQty = parseInt(tierDraft.min_qty, 10)
     const percent = Number(tierDraft.percent)
@@ -356,6 +391,11 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
           対象にした商品だけ表示（{items.size}件）
         </label>
       </div>
+      <div className="mb-3 flex flex-wrap items-center gap-2 text-sm">
+        <button onClick={() => void selectAll(null)} disabled={busy === 'bulk'} className="rounded-lg bg-pink-500 px-3 py-1.5 font-bold text-white disabled:opacity-50">店販を全部対象にする</button>
+        <button onClick={() => void clearAll(null)} disabled={busy === 'bulk'} className="rounded-lg border border-gray-300 bg-white px-3 py-1.5 text-gray-600 disabled:opacity-50">全部外す</button>
+        <span className="text-[11px] text-gray-500">全部入れてから、要らない商品のチェックを外すと楽です。グループごとの見出しからも選べます。</span>
+      </div>
       {error && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
       <div className="max-h-[65vh] overflow-auto rounded-xl border border-gray-100">
         <table className="w-full min-w-[980px] text-xs">
@@ -378,7 +418,13 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
               return (
                 <Fragment key={product.id}>
                   {product.category_id !== visible[index - 1]?.category_id && (
-                    <tr><td colSpan={7} className="sticky top-8 z-[5] bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600">{categoryName.get(product.category_id)}</td></tr>
+                    <tr><td colSpan={7} className="sticky top-8 z-[5] bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-600">
+                      <div className="flex flex-wrap items-center gap-2">
+                        {categoryName.get(product.category_id)}
+                        <button onClick={() => void selectAll(product.category_id)} disabled={busy === 'bulk'} className="rounded bg-pink-100 px-2 py-0.5 text-[11px] font-bold text-pink-700 disabled:opacity-50">このグループを全部対象にする</button>
+                        <button onClick={() => void clearAll(product.category_id)} disabled={busy === 'bulk'} className="rounded bg-white px-2 py-0.5 text-[11px] font-normal text-gray-500 disabled:opacity-50">全部外す</button>
+                      </div>
+                    </td></tr>
                   )}
                   <tr className={`border-t border-gray-100 ${item ? 'bg-pink-50/40' : ''}`}>
                     <td className="px-2 py-1.5 text-center">
