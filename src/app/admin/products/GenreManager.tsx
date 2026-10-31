@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetchAll'
+import { moveBefore, PickBar, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
 
 type Genre = { id: number; name: string; sort_order: number; count: number }
 
@@ -19,6 +20,7 @@ export default function GenreManager({ onChanged }: { onChanged?: () => void } =
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const pick = usePick<number>()
 
   const load = useCallback(async () => {
     const [genreResult, productResult] = await Promise.all([
@@ -89,6 +91,18 @@ export default function GenreManager({ onChanged }: { onChanged?: () => void } =
     if (target < 0 || target >= genres.length) return
     const next = [...genres]
     ;[next[index], next[target]] = [next[target], next[index]]
+    await saveOrder(next)
+  }
+
+  // 選んだジャンルを、押した行の上（null なら一番下）へまとめて移して保存
+  async function place(target: number | null) {
+    const byId = new Map(genres.map((genre) => [genre.id, genre]))
+    const next = moveBefore(genres.map((genre) => genre.id), pick.picked, target).map((id) => byId.get(id)!)
+    pick.clear()
+    await saveOrder(next)
+  }
+
+  async function saveOrder(next: Genre[]) {
     setSaving(true)
     const results = await Promise.all(next.map((genre, order) => supabase.from('product_genres').update({ sort_order: order + 1 }).eq('id', genre.id)))
     setSaving(false)
@@ -108,6 +122,7 @@ export default function GenreManager({ onChanged }: { onChanged?: () => void } =
           className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-base" />
         <button onClick={() => void add()} disabled={saving || !newName.trim()} className="shrink-0 rounded-lg bg-slate-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">追加</button>
       </div>
+      <PickBar count={pick.picked.size} onEnd={() => void place(null)} onClear={pick.clear} />
       <div className="divide-y divide-gray-100 rounded-xl border border-gray-100">
         {genres.map((genre, index) => (
           <div key={genre.id} className="px-3 py-2.5">
@@ -121,7 +136,9 @@ export default function GenreManager({ onChanged }: { onChanged?: () => void } =
               </div>
             ) : (
               <div className="flex items-center justify-between gap-3">
-                <div>
+                <PickToggle checked={pick.picked.has(genre.id)} onChange={() => pick.toggle(genre.id)} />
+                {pick.picked.size > 0 && !pick.picked.has(genre.id) && <PlaceHere onClick={() => void place(genre.id)} />}
+                <div className="min-w-0 flex-1">
                   <div className="font-medium text-gray-800">{genre.name}</div>
                   <div className="text-[11px] text-gray-400">取扱中 {genre.count}件</div>
                 </div>

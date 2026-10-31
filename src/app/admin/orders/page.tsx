@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { getCurrentProfile } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetchAll'
+import { moveBefore, PickBar, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
 
 type Store = { id: number; name: string }
 type Category = { id: number; name: string; sort_order: number }
@@ -57,6 +58,10 @@ export default function OrdersPage() {
   const [sorting, setSorting] = useState(false)
   const [draftSuppliers, setDraftSuppliers] = useState<string[]>([])
   const [draftProducts, setDraftProducts] = useState<Record<string, number[]>>({})
+  // 並び替え：選んでから「ここへ」。発注先を選ぶか、1つの発注先の中の商品を選ぶか（どちらか一方）
+  const supplierPick = usePick<string>()
+  const productPick = usePick<number>()
+  const [pickGroup, setPickGroup] = useState<string | null>(null)
   const [dirty, setDirty] = useState(false)
   const [saving, setSaving] = useState(false)
   const [receiptDate, setReceiptDate] = useState(today())
@@ -193,10 +198,44 @@ export default function OrdersPage() {
     setError('')
   }
 
+  function clearPicks() {
+    supplierPick.clear()
+    productPick.clear()
+    setPickGroup(null)
+  }
+
+  function toggleSupplierPick(name: string) {
+    productPick.clear()
+    setPickGroup(null)
+    supplierPick.toggle(name)
+  }
+
+  // 商品は同じ発注先の中でだけ動かす。別の発注先の商品を選んだら選び直し
+  function toggleProductPick(group: string, productId: number) {
+    supplierPick.clear()
+    if (pickGroup !== group) { productPick.clear(); setPickGroup(group) }
+    productPick.toggle(productId)
+  }
+
+  function placeSuppliers(target: string | null) {
+    setDraftSuppliers((list) => moveBefore(list, supplierPick.picked, target))
+    clearPicks()
+    setDirty(true)
+  }
+
+  function placeProducts(target: number | null) {
+    if (pickGroup === null) return
+    const group = pickGroup
+    setDraftProducts((groups) => ({ ...groups, [group]: moveBefore(groups[group] ?? [], productPick.picked, target) }))
+    clearPicks()
+    setDirty(true)
+  }
+
   function cancelSorting() {
     if (dirty && !confirm('保存していない並び替えがあります。やめてもよろしいですか？')) return
     setSorting(false)
     setDirty(false)
+    clearPicks()
   }
 
   async function saveSorting() {
@@ -312,7 +351,9 @@ export default function OrdersPage() {
             <span className="text-[11px] text-gray-400">各行の「入荷数」を直してから、発注先ごとにまとめて登録できます</span>
           </label>
         )}
-        {sorting && <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">並び替え中です（{stores.find((store) => store.id === storeId)?.name}だけに反映）。発注先は見出しの ↑↓、商品は各行の ↑↓ で動かします。発注数0の商品も薄く表示しています。</p>}
+        {sorting && <p className="rounded-xl bg-amber-50 px-3 py-2 text-xs text-amber-700">並び替え中です（{stores.find((store) => store.id === storeId)?.name}だけに反映）。発注先は見出しの ↑↓、商品は各行の ↑↓ で動かします。まとめて動かすときは「選ぶ」にチェック → 移したい場所の「ここへ」（商品は同じ発注先の中で動かせます）。発注数0の商品も薄く表示しています。</p>}
+        {sorting && <PickBar count={supplierPick.picked.size + productPick.picked.size} onClear={clearPicks}
+          onEnd={() => supplierPick.picked.size > 0 ? placeSuppliers(null) : placeProducts(null)} />}
         {message && <p className="rounded-xl bg-green-50 px-3 py-2 text-sm text-green-700">{message}</p>}
         {error && <p className="rounded-xl bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
 
@@ -338,6 +379,8 @@ export default function OrdersPage() {
                   )}
                   {sorting && (
                     <>
+                      <PickToggle checked={supplierPick.picked.has(name)} onChange={() => toggleSupplierPick(name)} label="発注先を選ぶ" />
+                      {supplierPick.picked.size > 0 && !supplierPick.picked.has(name) && <PlaceHere onClick={() => placeSuppliers(name)} />}
                       <button onClick={() => { setDraftSuppliers((list) => move(list, supplierIndex, -1)); setDirty(true) }} disabled={supplierIndex === 0}
                         className="rounded bg-white px-2 py-1 text-xs font-bold text-slate-600 disabled:opacity-30">↑</button>
                       <button onClick={() => { setDraftSuppliers((list) => move(list, supplierIndex, 1)); setDirty(true) }} disabled={supplierIndex === supplierList.length - 1}
@@ -354,7 +397,7 @@ export default function OrdersPage() {
                     <th className="w-16 px-2 py-2 text-center">現在庫</th>
                     <th className="w-20 px-3 py-2 text-center">発注数</th>
                     {!sorting && <th className="w-24 px-2 py-2 text-center">入荷数</th>}
-                    {sorting && <th className="w-20 px-2 py-2 text-center">順番</th>}
+                    {sorting && <th className="w-44 px-2 py-2 text-center">順番</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -379,6 +422,8 @@ export default function OrdersPage() {
                         {sorting && (
                           <td className="px-2 py-2 text-center">
                             <div className="flex justify-center gap-1">
+                              <PickToggle checked={pickGroup === name && productPick.picked.has(row.product_id)} onChange={() => toggleProductPick(name, row.product_id)} />
+                              {pickGroup === name && productPick.picked.size > 0 && !productPick.picked.has(row.product_id) && <PlaceHere onClick={() => placeProducts(row.product_id)} />}
                               <button onClick={() => { setDraftProducts((groups) => ({ ...groups, [name]: move(groups[name] ?? [], index, -1) })); setDirty(true) }} disabled={index === 0}
                                 className="rounded bg-gray-100 px-2 py-1 text-xs font-bold text-gray-600 disabled:opacity-30">↑</button>
                               <button onClick={() => { setDraftProducts((groups) => ({ ...groups, [name]: move(groups[name] ?? [], index, 1) })); setDirty(true) }} disabled={index === ids.length - 1}

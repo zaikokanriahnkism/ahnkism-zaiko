@@ -9,6 +9,7 @@ import { useRouter } from 'next/navigation'
 import { getCurrentProfile } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetchAll'
+import { moveBefore, PickBar, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
 
 type Store = { id: number; name: string }
 type Category = { id: number; name: string }
@@ -62,6 +63,7 @@ export default function ProductManagementPage() {
   const [sortStoreId, setSortStoreId] = useState<number | null>(null)
   const [sortCategoryId, setSortCategoryId] = useState<number | null>(null)
   const [sortRows, setSortRows] = useState<SortRow[]>([])
+  const sortPick = usePick<number>()
   const [sortLoading, setSortLoading] = useState(false)
   const [sortDirty, setSortDirty] = useState(false)
   // key = `${store_id}_${product_id}`。値は is_active、キーが無ければ store_products の行そのものが無い。
@@ -288,8 +290,9 @@ export default function ProductManagementPage() {
       return product ? [{ product_id: row.product_id, sort_order: row.sort_order, name: product.name as string, brand: (product.brand ?? null) as string | null }] : []
     })
     setSortRows(rows)
+    sortPick.clear()
     setSortLoading(false)
-  }, [sortStoreId, sortCategoryId])
+  }, [sortStoreId, sortCategoryId, sortPick.clear])
 
   useEffect(() => { void loadSortRows() }, [loadSortRows])
 
@@ -302,6 +305,16 @@ export default function ProductManagementPage() {
       next.splice(target, 0, moved)
       return next
     })
+    setSortDirty(true)
+  }
+
+  // 選んだ商品を、押した行の上（null なら一番下）へまとめて移す
+  function placeRows(target: number | null) {
+    setSortRows((previous) => {
+      const byId = new Map(previous.map((row) => [row.product_id, row]))
+      return moveBefore(previous.map((row) => row.product_id), sortPick.picked, target).map((id) => byId.get(id)!)
+    })
+    sortPick.clear()
     setSortDirty(true)
   }
 
@@ -480,6 +493,8 @@ export default function ProductManagementPage() {
           <div className="border-b border-gray-100 p-4">
             <h2 className="font-bold text-gray-800">並び替え</h2>
             <p className="mt-0.5 text-xs text-gray-400">店舗の入力画面に出てくる順番を変えます。店舗ごと・カテゴリごとに設定します。</p>
+            <p className="mt-0.5 text-xs text-amber-700">まとめて動かすときは「選ぶ」にチェック（何個でも）→ 移したい場所の「ここへ」。</p>
+            <PickBar count={sortPick.picked.size} onEnd={() => placeRows(null)} onClear={sortPick.clear} />
             <div className="mt-3 flex gap-2">
               <select value={sortStoreId ?? ''} onChange={(event) => setSortStoreId(Number(event.target.value))} className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-base">
                 {stores.map((store) => <option key={store.id} value={store.id}>{store.name}</option>)}
@@ -498,7 +513,9 @@ export default function ProductManagementPage() {
             {sortLoading && <p className="py-8 text-center text-sm text-gray-400">読み込み中...</p>}
             {!sortLoading && sortRows.length === 0 && <p className="py-8 text-center text-sm text-gray-400">この店舗・カテゴリの商品がありません</p>}
             {!sortLoading && sortRows.map((row, index) => (
-              <div key={row.product_id} className="flex items-center gap-3 px-4 py-2.5">
+              <div key={row.product_id} className={`flex items-center gap-3 px-4 py-2.5 ${sortPick.picked.has(row.product_id) ? 'bg-amber-50' : ''}`}>
+                <PickToggle checked={sortPick.picked.has(row.product_id)} onChange={() => sortPick.toggle(row.product_id)} />
+                {sortPick.picked.size > 0 && !sortPick.picked.has(row.product_id) && <PlaceHere onClick={() => placeRows(row.product_id)} />}
                 <span className="w-6 shrink-0 text-xs text-gray-300">{index + 1}</span>
                 <div className="min-w-0 flex-1">
                   {row.brand && <div className="text-xs text-gray-400">{row.brand}</div>}
