@@ -47,6 +47,8 @@ export type OrderLine = {
   needs_order?: boolean
   // お渡しで数を変えたときの、もとの予約数（変えていなければ null）
   reserved_qty?: number | null
+  // 打ち込んだ順番（以前の予約は null）
+  line_no?: number | null
 }
 
 export type PresaleOrder = {

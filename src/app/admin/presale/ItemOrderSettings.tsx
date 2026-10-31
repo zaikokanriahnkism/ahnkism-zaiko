@@ -20,7 +20,7 @@ export default function ItemOrderSettings({ campaign, stores }: { campaign: Pres
   const pick = usePick<number>()
 
   const nameOf = (item: Item) => `${item.brand ? `${item.brand} ` : ''}${item.name}`
-  const byName = useCallback((list: Item[]) => [...list].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'ja')), [])
+  const byName = useCallback((list: Item[]) => [...list].sort((a, b) => nameOf(a).localeCompare(nameOf(b), 'ja', { numeric: true })), [])
 
   const load = useCallback(async () => {
     if (!storeId) return

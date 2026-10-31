@@ -606,7 +606,7 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
     return dealers.map((dealer) => ({
       dealer,
       items: (byDealer.get(dealer) ?? []).sort((a, b) => (productSort.get(a.product_id) ?? LAST) - (productSort.get(b.product_id) ?? LAST)
-        || `${a.brand ?? ''}${a.name}`.localeCompare(`${b.brand ?? ''}${b.name}`, 'ja')),
+        || `${a.brand ?? ''}${a.name}`.localeCompare(`${b.brand ?? ''}${b.name}`, 'ja', { numeric: true })),
     }))
   }, [dealerSort, items, productSort])
 

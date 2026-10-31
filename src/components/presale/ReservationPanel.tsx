@@ -140,8 +140,20 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
     // 店舗ごとに非表示にした商品は、その店舗の商品選びに出さない
     return items.filter((item) => draft.store_id === null || !(item.hidden_store_ids ?? []).includes(draft.store_id))
       .sort((a, b) => (order.get(a.product_id) ?? LAST) - (order.get(b.product_id) ?? LAST)
-      || `${a.brand ?? ''}${a.name}`.localeCompare(`${b.brand ?? ''}${b.name}`, 'ja'))
+      || `${a.brand ?? ''}${a.name}`.localeCompare(`${b.brand ?? ''}${b.name}`, 'ja', { numeric: true }))
   }, [draft.store_id, itemSort, items])
+  // 予約の中の商品は打ち込んだ順（line_no）。以前の予約で順番が残っていないものは、その店舗の商品の並び → 名前順
+  const orderedOrders = useMemo(() => {
+    const storeRank = new Map(itemSort.map((row) => [`${row.store_id}_${row.product_id}`, row.sort_order]))
+    const LAST = Number.MAX_SAFE_INTEGER
+    const label = (productId: number) => { const item = itemMap.get(productId); return item ? `${item.brand ?? ''}${item.name}` : '' }
+    return orders.map((order) => ({
+      ...order,
+      lines: [...order.lines].sort((a, b) => (a.line_no ?? LAST) - (b.line_no ?? LAST)
+        || (storeRank.get(`${order.store_id}_${a.product_id}`) ?? LAST) - (storeRank.get(`${order.store_id}_${b.product_id}`) ?? LAST)
+        || label(a.product_id).localeCompare(label(b.product_id), 'ja', { numeric: true })),
+    }))
+  }, [itemMap, itemSort, orders])
   const staffMap = useMemo(() => new Map([...staff, ...otherStaff].map((person) => [person.id, person])), [otherStaff, staff])
   const storeName = useMemo(() => new Map(stores.map((store) => [store.id, store.name])), [stores])
   const formStaff = staff.filter((person) => person.is_active && person.store_id === draft.store_id)
@@ -328,7 +340,7 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
     await load()
   }
 
-  const scopedOrders = orders.filter((order) => filterStore === 'all' || order.store_id === filterStore)
+  const scopedOrders = orderedOrders.filter((order) => filterStore === 'all' || order.store_id === filterStore)
   // 1店舗だけを見ているときは、予約を登録した順に並べ、発注済みの区切り線を入れる
   const dividerStore = storeId ?? (filterStore === 'all' ? null : filterStore)
   const storeCheckpoints = checkpoints.filter((point) => point.store_id === dividerStore).sort((a, b) => b.created_at.localeCompare(a.created_at))

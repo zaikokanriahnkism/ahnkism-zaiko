@@ -65,7 +65,7 @@ export default function NeedsOrderList({ campaign, stores }: { campaign: Presale
       })
     return Array.from(map.values()).sort((a, b) => {
       const pa = products.get(a.product_id); const pb = products.get(b.product_id)
-      return `${pa?.brand ?? ''}${pa?.name ?? ''}`.localeCompare(`${pb?.brand ?? ''}${pb?.name ?? ''}`, 'ja')
+      return `${pa?.brand ?? ''}${pa?.name ?? ''}`.localeCompare(`${pb?.brand ?? ''}${pb?.name ?? ''}`, 'ja', { numeric: true })
     })
   }, [lines, products, storeId])
 
