@@ -12,7 +12,9 @@ export function moveBefore<K>(list: K[], picked: Set<K>, target: K | null): K[] 
   return [...rest.slice(0, index), ...moving, ...rest.slice(index)]
 }
 
+// active：「並べ替え」ボタンを押している間だけ「選ぶ」「ここへ」を出す（普段は表示をすっきりさせる）
 export function usePick<K>() {
+  const [active, setActiveState] = useState(false)
   const [picked, setPicked] = useState<Set<K>>(new Set())
   const toggle = useCallback((key: K) => setPicked((previous) => {
     const next = new Set(previous)
@@ -21,7 +23,17 @@ export function usePick<K>() {
     return next
   }), [])
   const clear = useCallback(() => setPicked(new Set()), [])
-  return { picked, toggle, clear }
+  const setActive = useCallback((value: boolean) => { setActiveState(value); if (!value) setPicked(new Set()) }, [])
+  return { active, setActive, picked, toggle, clear }
+}
+
+export function PickModeButton({ active, onChange }: { active: boolean; onChange: (value: boolean) => void }) {
+  return (
+    <button onClick={() => onChange(!active)}
+      className={`shrink-0 rounded-lg px-3 py-1.5 text-xs font-bold ${active ? 'bg-amber-500 text-white' : 'border border-amber-300 bg-white text-amber-700'}`}>
+      {active ? '並べ替えを終わる' : '並べ替え（まとめて移動）'}
+    </button>
+  )
 }
 
 export function PickToggle({ checked, onChange, label = '選ぶ' }: { checked: boolean; onChange: () => void; label?: string }) {

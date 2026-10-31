@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { PresaleCampaign } from '@/lib/presale'
-import { moveBefore, PickBar, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
+import { moveBefore, PickBar, PickModeButton, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
 
 type Store = { id: number; name: string }
 type Item = { product_id: number; brand: string | null; name: string; hidden: boolean }
@@ -72,7 +72,7 @@ export default function ItemOrderSettings({ campaign, stores }: { campaign: Pres
   function changeStore(id: number) {
     if (dirty && !confirm('保存していない並び替えがあります。保存せずに店舗を切り替えますか？')) return
     setStoreId(id)
-    pick.clear()
+    pick.setActive(false)
     setMessage('')
   }
 
@@ -94,7 +94,10 @@ export default function ItemOrderSettings({ campaign, stores }: { campaign: Pres
     <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
       <h2 className="font-bold text-gray-800">店舗ごとの商品の並び</h2>
       <p className="mt-1 text-xs text-gray-500">店舗の予約ページで「商品を選ぶ」を開いたときの順番です。よく出る商品を上にしておくと選びやすくなります。次の企画でも、同じ商品は同じ順で出ます。</p>
-      <p className="mt-1 text-xs text-amber-700">動かしたい商品の「選ぶ」にチェック（何個でも）→ 移したい場所の「ここへ」を押すと、まとめて移せます。</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <PickModeButton active={pick.active} onChange={pick.setActive} />
+        {pick.active && <p className="text-xs text-amber-700">動かしたい商品の「選ぶ」にチェック（何個でも）→ 移したい場所の「ここへ」を押すと、まとめて移せます。</p>}
+      </div>
       <PickBar count={pick.picked.size} onEnd={() => place(null)} onClear={pick.clear} />
       <div className="mt-3 flex flex-wrap gap-2">
         {stores.map((store) => (
@@ -111,8 +114,8 @@ export default function ItemOrderSettings({ campaign, stores }: { campaign: Pres
           if (!item) return null
           return (
             <li key={productId} className={`flex items-center gap-2 px-3 py-2 text-sm ${pick.picked.has(productId) ? 'bg-amber-50' : ''}`}>
-              <PickToggle checked={pick.picked.has(productId)} onChange={() => pick.toggle(productId)} />
-              {pick.picked.size > 0 && !pick.picked.has(productId) && <PlaceHere onClick={() => place(productId)} />}
+              {pick.active && <PickToggle checked={pick.picked.has(productId)} onChange={() => pick.toggle(productId)} />}
+              {pick.active && pick.picked.size > 0 && !pick.picked.has(productId) && <PlaceHere onClick={() => place(productId)} />}
               <span className="w-6 shrink-0 text-right text-xs text-gray-400">{index + 1}</span>
               <span className={`min-w-0 flex-1 break-words ${item.hidden ? 'text-gray-300 line-through' : ''}`}>{nameOf(item)}{item.hidden && <span className="ml-1 text-[10px] text-gray-400 no-underline">（この店舗では非表示）</span>}</span>
               <button onClick={() => moveToTop(index)} disabled={index === 0} className="shrink-0 rounded bg-gray-100 px-2 py-1 text-xs text-gray-600 disabled:opacity-30">一番上へ</button>

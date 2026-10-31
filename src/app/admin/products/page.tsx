@@ -9,7 +9,7 @@ import { useRouter } from 'next/navigation'
 import { getCurrentProfile } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetchAll'
-import { moveBefore, PickBar, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
+import { moveBefore, PickBar, PickModeButton, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
 
 type Store = { id: number; name: string }
 type Category = { id: number; name: string }
@@ -500,7 +500,10 @@ export default function ProductManagementPage() {
           <div className="border-b border-gray-100 p-4">
             <h2 className="font-bold text-gray-800">並び替え</h2>
             <p className="mt-0.5 text-xs text-gray-400">店舗の入力画面に出てくる順番を変えます。店舗ごと・カテゴリごとに設定します。</p>
-            <p className="mt-0.5 text-xs text-amber-700">まとめて動かすときは「選ぶ」にチェック（何個でも）→ 移したい場所の「ここへ」。</p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <PickModeButton active={sortPick.active} onChange={sortPick.setActive} />
+              {sortPick.active && <p className="text-xs text-amber-700">動かしたい商品の「選ぶ」にチェック（何個でも）→ 移したい場所の「ここへ」。</p>}
+            </div>
             <PickBar count={sortPick.picked.size} onEnd={() => placeRows(null)} onClear={sortPick.clear} />
             <div className="mt-3 flex gap-2">
               <select value={sortStoreId ?? ''} onChange={(event) => setSortStoreId(Number(event.target.value))} className="flex-1 rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-base">
@@ -521,8 +524,8 @@ export default function ProductManagementPage() {
             {!sortLoading && sortRows.length === 0 && <p className="py-8 text-center text-sm text-gray-400">この店舗・カテゴリの商品がありません</p>}
             {!sortLoading && sortRows.map((row, index) => (
               <div key={row.product_id} className={`flex items-center gap-3 px-4 py-2.5 ${sortPick.picked.has(row.product_id) ? 'bg-amber-50' : ''}`}>
-                <PickToggle checked={sortPick.picked.has(row.product_id)} onChange={() => sortPick.toggle(row.product_id)} />
-                {sortPick.picked.size > 0 && !sortPick.picked.has(row.product_id) && <PlaceHere onClick={() => placeRows(row.product_id)} />}
+                {sortPick.active && <PickToggle checked={sortPick.picked.has(row.product_id)} onChange={() => sortPick.toggle(row.product_id)} />}
+                {sortPick.active && sortPick.picked.size > 0 && !sortPick.picked.has(row.product_id) && <PlaceHere onClick={() => placeRows(row.product_id)} />}
                 <span className="w-6 shrink-0 text-xs text-gray-300">{index + 1}</span>
                 <div className="min-w-0 flex-1">
                   {row.brand && <div className="text-xs text-gray-400">{row.brand}</div>}

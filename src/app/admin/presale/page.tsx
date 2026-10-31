@@ -10,7 +10,7 @@ import { withoutTax, yen } from '@/lib/tax'
 import ReservationPanel from '@/components/presale/ReservationPanel'
 import ItemOrderSettings from './ItemOrderSettings'
 import NeedsOrderList from './NeedsOrderList'
-import { moveBefore, PickBar, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
+import { moveBefore, PickBar, PickModeButton, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
 import {
   discountedPrice, looksLikeDevice, regularPriceWithTax,
   type BulkTier, type DiscountType, type PresaleCampaign, type PresaleItem, type Staff, type StaffGoal,
@@ -550,6 +550,7 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
   const dealerPick = usePick<string>()
   const productPick = usePick<number>()
   const [pickGroup, setPickGroup] = useState<string | null>(null)
+  const [sortMode, setSortMode] = useState(false)
   const [lines, setLines] = useState<{ store_id: number; product_id: number; quantity: number; delivered: boolean }[]>([])
   const [allocations, setAllocations] = useState<Map<string, number>>(new Map())
   const [stock, setStock] = useState<Map<string, number>>(new Map())
@@ -667,7 +668,10 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
     <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
       <p className="mb-1 text-xs text-gray-500">入荷したあとで、各店舗の<b>「先行分」</b>に先行予約用として確保した数を入れてください。お渡し済みにすると先行分の残りと在庫が自動で減ります。</p>
       <p className="mb-1 text-[11px] text-gray-400">残り ＝ 先行分 − お渡し済み（渡済）／通常 ＝ 今の在庫 − 先行分の残り（発注リストもこの通常在庫で計算）。予約合計は発注数の目安です。</p>
-      <p className="mb-3 text-[11px] text-amber-700">発注先ごとに分けています。並びを変えるときは「選ぶ」にチェック（何個でも）→ 移したい場所の「ここへ」。商品は同じ発注先の中で動かせます。並びは次の企画でもそのまま使います。発注先は商品の管理で入れられます。</p>
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <PickModeButton active={sortMode} onChange={(value) => { setSortMode(value); clearPicks() }} />
+        <p className="text-[11px] text-amber-700">発注先ごとに分けています。{sortMode ? '「選ぶ」にチェック（何個でも）→ 移したい場所の「ここへ」。商品は同じ発注先の中で動かせます。' : ''}並びは次の企画でもそのまま使います。</p>
+      </div>
       <PickBar count={dealerPick.picked.size + productPick.picked.size} onClear={clearPicks}
         onEnd={() => void (dealerPick.picked.size > 0 ? placeDealers(null) : placeProducts(null))} />
       {error && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
@@ -699,8 +703,8 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
                   <div className="sticky left-0 flex w-fit flex-wrap items-center gap-2">
                     <span className="text-sm font-bold text-slate-700">{group.dealer}</span>
                     <span className="text-[11px] text-slate-500">{group.items.length}件</span>
-                    {group.dealer !== NO_DEALER && <PickToggle checked={dealerPick.picked.has(group.dealer)} onChange={() => toggleDealerPick(group.dealer)} label="発注先を選ぶ" />}
-                    {dealerPick.picked.size > 0 && !dealerPick.picked.has(group.dealer) && <PlaceHere onClick={() => void placeDealers(group.dealer)} />}
+                    {sortMode && group.dealer !== NO_DEALER && <PickToggle checked={dealerPick.picked.has(group.dealer)} onChange={() => toggleDealerPick(group.dealer)} label="発注先を選ぶ" />}
+                    {sortMode && dealerPick.picked.size > 0 && !dealerPick.picked.has(group.dealer) && <PlaceHere onClick={() => void placeDealers(group.dealer)} />}
                   </div>
                 </td>
               </tr>
@@ -710,10 +714,12 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
               return (
                 <tr key={item.product_id} className="border-t border-gray-100">
                   <td className={`sticky left-0 z-10 w-[150px] min-w-[150px] px-2 py-1.5 ${picked ? 'bg-amber-50' : 'bg-white'}`}>
-                    <div className="mb-0.5 flex flex-wrap gap-1">
-                      <PickToggle checked={picked} onChange={() => toggleProductPick(group.dealer, item.product_id)} />
-                      {pickGroup === group.dealer && productPick.picked.size > 0 && !picked && <PlaceHere onClick={() => void placeProducts(item.product_id)} />}
-                    </div>
+                    {sortMode && (
+                      <div className="mb-0.5 flex flex-wrap gap-1">
+                        <PickToggle checked={picked} onChange={() => toggleProductPick(group.dealer, item.product_id)} />
+                        {pickGroup === group.dealer && productPick.picked.size > 0 && !picked && <PlaceHere onClick={() => void placeProducts(item.product_id)} />}
+                      </div>
+                    )}
                     <div className="text-[10px] text-gray-400">{item.brand}</div>
                     <div className="break-words font-medium text-gray-700">{item.name}</div>
                   </td>

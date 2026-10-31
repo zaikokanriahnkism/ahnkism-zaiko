@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetchAll'
-import { moveBefore, PickBar, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
+import { moveBefore, PickBar, PickModeButton, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
 
 type Genre = { id: number; name: string; sort_order: number; count: number }
 
@@ -122,6 +122,7 @@ export default function GenreManager({ onChanged }: { onChanged?: () => void } =
           className="min-w-0 flex-1 rounded-lg border border-gray-200 px-3 py-2 text-base" />
         <button onClick={() => void add()} disabled={saving || !newName.trim()} className="shrink-0 rounded-lg bg-slate-700 px-4 py-2 text-sm font-bold text-white disabled:opacity-40">追加</button>
       </div>
+      <div className="mb-2"><PickModeButton active={pick.active} onChange={pick.setActive} /></div>
       <PickBar count={pick.picked.size} onEnd={() => void place(null)} onClear={pick.clear} />
       <div className="divide-y divide-gray-100 rounded-xl border border-gray-100">
         {genres.map((genre, index) => (
@@ -136,8 +137,8 @@ export default function GenreManager({ onChanged }: { onChanged?: () => void } =
               </div>
             ) : (
               <div className="flex items-center justify-between gap-3">
-                <PickToggle checked={pick.picked.has(genre.id)} onChange={() => pick.toggle(genre.id)} />
-                {pick.picked.size > 0 && !pick.picked.has(genre.id) && <PlaceHere onClick={() => void place(genre.id)} />}
+                {pick.active && <PickToggle checked={pick.picked.has(genre.id)} onChange={() => pick.toggle(genre.id)} />}
+                {pick.active && pick.picked.size > 0 && !pick.picked.has(genre.id) && <PlaceHere onClick={() => void place(genre.id)} />}
                 <div className="min-w-0 flex-1">
                   <div className="font-medium text-gray-800">{genre.name}</div>
                   <div className="text-[11px] text-gray-400">取扱中 {genre.count}件</div>
