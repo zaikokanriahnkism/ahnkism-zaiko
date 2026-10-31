@@ -10,6 +10,7 @@ import { withoutTax, yen } from '@/lib/tax'
 import ReservationPanel from '@/components/presale/ReservationPanel'
 import ItemOrderSettings from './ItemOrderSettings'
 import NeedsOrderList from './NeedsOrderList'
+import { moveBefore, PickBar, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
 import {
   discountedPrice, looksLikeDevice, regularPriceWithTax,
   type BulkTier, type DiscountType, type PresaleCampaign, type PresaleItem, type Staff, type StaffGoal,
@@ -538,9 +539,17 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
   )
 }
 
+const NO_DEALER = '発注先なし'
+
 // 集計と先行分の在庫。先行分の残り＝先行分として確保した数−お渡し済み、通常在庫＝今の在庫−先行分の残り
 function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores: Store[] }) {
-  const [items, setItems] = useState<{ product_id: number; brand: string | null; name: string }[]>([])
+  const [items, setItems] = useState<{ product_id: number; brand: string | null; name: string; dealer: string }[]>([])
+  // 並び（本部が「選ぶ → ここへ」で決める。企画をまたいで同じ）
+  const [productSort, setProductSort] = useState<Map<number, number>>(new Map())
+  const [dealerSort, setDealerSort] = useState<Map<string, number>>(new Map())
+  const dealerPick = usePick<string>()
+  const productPick = usePick<number>()
+  const [pickGroup, setPickGroup] = useState<string | null>(null)
   const [lines, setLines] = useState<{ store_id: number; product_id: number; quantity: number; delivered: boolean }[]>([])
   const [allocations, setAllocations] = useState<Map<string, number>>(new Map())
   const [stock, setStock] = useState<Map<string, number>>(new Map())
@@ -548,19 +557,23 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
-    const [itemResult, lineResult, allocationResult, stockResult] = await Promise.all([
-      supabase.from('presale_items').select('product_id, product:products!inner(brand, name)').eq('campaign_id', campaign.id),
+    const [itemResult, lineResult, allocationResult, stockResult, productSortResult, dealerSortResult] = await Promise.all([
+      supabase.from('presale_items').select('product_id, product:products!inner(brand, name, dealer)').eq('campaign_id', campaign.id),
       fetchAll((start, end) => supabase.from('presale_order_lines')
         .select('product_id, quantity, presale_orders!inner(store_id, campaign_id, cancelled_at, delivered_at)')
         .eq('presale_orders.campaign_id', campaign.id).is('presale_orders.cancelled_at', null).order('id').range(start, end)),
       supabase.from('presale_allocations').select('store_id, product_id, allocated_qty').eq('campaign_id', campaign.id),
       fetchAll((start, end) => supabase.from('current_store_stock').select('store_id, product_id, current_stock').order('store_id').order('product_id').range(start, end)),
+      fetchAll((start, end) => supabase.from('presale_summary_sort').select('product_id, sort_order').order('product_id').range(start, end)),
+      supabase.from('presale_summary_dealer_sort').select('dealer, sort_order'),
     ])
     if (itemResult.error || lineResult.error || allocationResult.error || stockResult.error) setError('データを読み込めませんでした。')
     setItems((itemResult.data ?? []).map((row) => {
-      const product = (Array.isArray(row.product) ? row.product[0] : row.product) as { brand: string | null; name: string }
-      return { product_id: row.product_id as number, brand: product.brand, name: product.name }
-    }).sort((a, b) => `${a.brand ?? ''}${a.name}`.localeCompare(`${b.brand ?? ''}${b.name}`, 'ja')))
+      const product = (Array.isArray(row.product) ? row.product[0] : row.product) as { brand: string | null; name: string; dealer: string | null }
+      return { product_id: row.product_id as number, brand: product.brand, name: product.name, dealer: product.dealer?.trim() || NO_DEALER }
+    }))
+    setProductSort(new Map(((productSortResult.data ?? []) as { product_id: number; sort_order: number }[]).map((row) => [row.product_id, row.sort_order])))
+    setDealerSort(new Map(((dealerSortResult.data ?? []) as { dealer: string; sort_order: number }[]).map((row) => [row.dealer, row.sort_order])))
     setLines((lineResult.data ?? []).map((row) => {
       const order = Array.isArray(row.presale_orders) ? row.presale_orders[0] : row.presale_orders
       return { store_id: order.store_id, product_id: row.product_id, quantity: row.quantity, delivered: !!order.delivered_at }
@@ -583,6 +596,59 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
     return map
   }, [lines])
 
+  // 発注先ごとにまとめる。発注先の順・発注先の中の順は保存した並び、まだ決めていないものは名前順で後ろ（発注先なしは一番下）
+  const groups = useMemo(() => {
+    const LAST = Number.MAX_SAFE_INTEGER
+    const byDealer = new Map<string, typeof items>()
+    items.forEach((item) => byDealer.set(item.dealer, [...(byDealer.get(item.dealer) ?? []), item]))
+    const dealers = [...byDealer.keys()].sort((a, b) => Number(a === NO_DEALER) - Number(b === NO_DEALER)
+      || (dealerSort.get(a) ?? LAST) - (dealerSort.get(b) ?? LAST) || a.localeCompare(b, 'ja'))
+    return dealers.map((dealer) => ({
+      dealer,
+      items: (byDealer.get(dealer) ?? []).sort((a, b) => (productSort.get(a.product_id) ?? LAST) - (productSort.get(b.product_id) ?? LAST)
+        || `${a.brand ?? ''}${a.name}`.localeCompare(`${b.brand ?? ''}${b.name}`, 'ja')),
+    }))
+  }, [dealerSort, items, productSort])
+
+  function clearPicks() {
+    dealerPick.clear()
+    productPick.clear()
+    setPickGroup(null)
+  }
+
+  function toggleDealerPick(dealer: string) {
+    productPick.clear()
+    setPickGroup(null)
+    dealerPick.toggle(dealer)
+  }
+
+  // 商品は同じ発注先の中でだけ動かす。別の発注先の商品を選んだら選び直し
+  function toggleProductPick(dealer: string, productId: number) {
+    dealerPick.clear()
+    if (pickGroup !== dealer) { productPick.clear(); setPickGroup(dealer) }
+    productPick.toggle(productId)
+  }
+
+  async function placeDealers(target: string | null) {
+    const ordered = moveBefore(groups.map((group) => group.dealer).filter((dealer) => dealer !== NO_DEALER), dealerPick.picked, target === NO_DEALER ? null : target)
+    clearPicks()
+    setDealerSort(new Map(ordered.map((dealer, index) => [dealer, index + 1])))
+    const { error: saveError } = await supabase.from('presale_summary_dealer_sort')
+      .upsert(ordered.map((dealer, index) => ({ dealer, sort_order: index + 1 })), { onConflict: 'dealer' })
+    if (saveError) setError(`並びを保存できませんでした：${saveError.message}`)
+  }
+
+  async function placeProducts(target: number | null) {
+    const group = groups.find((item) => item.dealer === pickGroup)
+    if (!group) return
+    const ordered = moveBefore(group.items.map((item) => item.product_id), productPick.picked, target)
+    clearPicks()
+    setProductSort((previous) => { const next = new Map(previous); ordered.forEach((id, index) => next.set(id, index + 1)); return next })
+    const { error: saveError } = await supabase.from('presale_summary_sort')
+      .upsert(ordered.map((productId, index) => ({ product_id: productId, sort_order: index + 1 })), { onConflict: 'product_id' })
+    if (saveError) setError(`並びを保存できませんでした：${saveError.message}`)
+  }
+
   async function saveAllocation(storeId: number, productId: number) {
     const key = `${storeId}_${productId}`
     const raw = drafts[key]
@@ -600,7 +666,10 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
   return (
     <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
       <p className="mb-1 text-xs text-gray-500">入荷したあとで、各店舗の<b>「先行分」</b>に先行予約用として確保した数を入れてください。お渡し済みにすると先行分の残りと在庫が自動で減ります。</p>
-      <p className="mb-3 text-[11px] text-gray-400">残り ＝ 先行分 − お渡し済み（渡済）／通常 ＝ 今の在庫 − 先行分の残り（発注リストもこの通常在庫で計算）。予約合計は発注数の目安です。</p>
+      <p className="mb-1 text-[11px] text-gray-400">残り ＝ 先行分 − お渡し済み（渡済）／通常 ＝ 今の在庫 − 先行分の残り（発注リストもこの通常在庫で計算）。予約合計は発注数の目安です。</p>
+      <p className="mb-3 text-[11px] text-amber-700">発注先ごとに分けています。並びを変えるときは「選ぶ」にチェック（何個でも）→ 移したい場所の「ここへ」。商品は同じ発注先の中で動かせます。並びは次の企画でもそのまま使います。発注先は商品の管理で入れられます。</p>
+      <PickBar count={dealerPick.picked.size + productPick.picked.size} onClear={clearPicks}
+        onEnd={() => void (dealerPick.picked.size > 0 ? placeDealers(null) : placeProducts(null))} />
       {error && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
       <div className="max-h-[70vh] overflow-auto rounded-xl border border-gray-100">
         <table className="w-max min-w-full text-xs">
@@ -623,11 +692,28 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => {
+            {groups.map((group) => (
+              <Fragment key={group.dealer}>
+              <tr className="border-t-2 border-slate-300 bg-slate-100">
+                <td colSpan={2 + stores.length * 5} className="px-2 py-1.5">
+                  <div className="sticky left-0 flex w-fit flex-wrap items-center gap-2">
+                    <span className="text-sm font-bold text-slate-700">{group.dealer}</span>
+                    <span className="text-[11px] text-slate-500">{group.items.length}件</span>
+                    {group.dealer !== NO_DEALER && <PickToggle checked={dealerPick.picked.has(group.dealer)} onChange={() => toggleDealerPick(group.dealer)} label="発注先を選ぶ" />}
+                    {dealerPick.picked.size > 0 && !dealerPick.picked.has(group.dealer) && <PlaceHere onClick={() => void placeDealers(group.dealer)} />}
+                  </div>
+                </td>
+              </tr>
+            {group.items.map((item) => {
               const totalReserved = stores.reduce((sum, store) => sum + (reservedMap.get(`${store.id}_${item.product_id}`)?.reserved ?? 0), 0)
+              const picked = pickGroup === group.dealer && productPick.picked.has(item.product_id)
               return (
                 <tr key={item.product_id} className="border-t border-gray-100">
-                  <td className="sticky left-0 z-10 w-[150px] min-w-[150px] bg-white px-2 py-1.5">
+                  <td className={`sticky left-0 z-10 w-[150px] min-w-[150px] px-2 py-1.5 ${picked ? 'bg-amber-50' : 'bg-white'}`}>
+                    <div className="mb-0.5 flex flex-wrap gap-1">
+                      <PickToggle checked={picked} onChange={() => toggleProductPick(group.dealer, item.product_id)} />
+                      {pickGroup === group.dealer && productPick.picked.size > 0 && !picked && <PlaceHere onClick={() => void placeProducts(item.product_id)} />}
+                    </div>
                     <div className="text-[10px] text-gray-400">{item.brand}</div>
                     <div className="break-words font-medium text-gray-700">{item.name}</div>
                   </td>
@@ -658,6 +744,8 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
                 </tr>
               )
             })}
+              </Fragment>
+            ))}
           </tbody>
         </table>
         {items.length === 0 && <p className="py-8 text-center text-sm text-gray-400">まだ対象商品がありません。「対象商品と割引」で選んでください</p>}
