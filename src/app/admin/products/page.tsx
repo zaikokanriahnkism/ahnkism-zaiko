@@ -163,6 +163,8 @@ export default function ProductManagementPage() {
       required_qty: 0,
       sort_order: maxSort,
       is_active: true,
+      // 店販・全店在庫のカテゴリに入れた商品は店販用にする（先行予約の対象に選べるように）
+      product_type: isRetailCategory(resolvedCategoryId) ? 'retail' : 'material',
     }).select('id').single()
     if (productError || !created) {
       setError(productError?.message ?? '商品を追加できませんでした。')
@@ -316,6 +318,11 @@ export default function ProductManagementPage() {
     })
     sortPick.clear()
     setSortDirty(true)
+  }
+
+  function isRetailCategory(id: number) {
+    const name = categories.find((category) => category.id === id)?.name ?? ''
+    return name.startsWith('店販') || name === '全店在庫'
   }
 
   async function saveOrder() {
