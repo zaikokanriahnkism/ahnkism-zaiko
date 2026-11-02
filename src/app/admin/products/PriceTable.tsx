@@ -4,7 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetchAll'
 import GenreManager from './GenreManager'
-import { withTax, withoutTax } from '@/lib/tax'
+import { withTax, withoutTax, withoutTaxExact } from '@/lib/tax'
 
 type Category = { id: number; name: string }
 type PriceProduct = {
@@ -159,7 +159,7 @@ export default function PriceTable({ categories }: { categories: Category[] }) {
 
   function shown(amount: number | null) {
     if (amount === null) return ''
-    return String(taxIncluded ? withTax(amount) : amount)
+    return String(taxIncluded ? withTax(amount) : Math.round(amount))
   }
 
   async function savePrice(product: PriceProduct, field: 'cost_price' | 'sale_price') {
@@ -174,7 +174,7 @@ export default function PriceTable({ categories }: { categories: Category[] }) {
         setError('価格は0以上の数字で入力してください。')
         return
       }
-      value = taxIncluded ? withoutTax(parsed) : Math.round(parsed)
+      value = !taxIncluded ? Math.round(parsed) : field === 'sale_price' ? withoutTaxExact(parsed) : withoutTax(parsed)
     }
     if (value === product[field]) {
       setDrafts((previous) => { const next = { ...previous }; delete next[key]; return next })

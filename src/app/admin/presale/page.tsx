@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { getCurrentProfile } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetchAll'
-import { withoutTax, yen } from '@/lib/tax'
+import { withoutTaxExact, yen } from '@/lib/tax'
 import ReservationPanel from '@/components/presale/ReservationPanel'
 import ItemOrderSettings from './ItemOrderSettings'
 import NeedsOrderList from './NeedsOrderList'
@@ -369,7 +369,7 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
     const raw = drafts[key]
     if (raw === undefined) return
     const trimmed = raw.replace(/[,，¥円\s]/g, '')
-    const value = trimmed === '' ? null : withoutTax(Number(trimmed))
+    const value = trimmed === '' ? null : withoutTaxExact(Number(trimmed))
     if (value !== null && (!Number.isFinite(value) || value < 0)) { setError('価格は0以上の数字で入力してください。'); return }
     setBusy(key)
     const { error: updateError } = await supabase.from('products').update({ sale_price: value }).eq('id', product.id)
