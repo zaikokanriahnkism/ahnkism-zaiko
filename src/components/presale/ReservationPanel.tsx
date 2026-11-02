@@ -381,8 +381,8 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
           count: mine.length,
         }
       })
-      // 目標を入れたスタッフだけ出す（本部の人など、目標のない人は出さない。お勧めした予約は店舗の合計には入る）
-      .filter((row) => row.goal > 0)
+      // 目標を入れたか、予約を取ったスタッフを出す
+      .filter((row) => row.goal > 0 || row.count > 0)
   }, [filterStore, goals, helpOrders, orders, staff, storeId, stores])
 
   const deliverModal = deliverTarget && (
@@ -596,7 +596,8 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
         </div>
       </section>
 
-      <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+      {/* 本部の画面では「スタッフ名簿と目標」タブに出すので、ここは店舗の予約ページだけ */}
+      {access && <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
         <h2 className="mb-3 font-bold text-gray-800">スタッフの目標と予約金額</h2>
         <div className="space-y-2">
           {progress.map(({ person, goal, reserved, delivered, count }) => {
@@ -615,9 +616,9 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
               </div>
             )
           })}
-          {progress.length === 0 && <p className="py-4 text-center text-sm text-gray-400">{staff.length === 0 ? 'スタッフ名簿がありません' : 'この企画の目標がまだ入っていません（本部の「スタッフ名簿と目標」で入れると出ます）'}</p>}
+          {progress.length === 0 && <p className="py-4 text-center text-sm text-gray-400">{staff.length === 0 ? 'スタッフ名簿がありません' : 'まだ予約も目標もありません'}</p>}
         </div>
-      </section>
+      </section>}
 
       <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">

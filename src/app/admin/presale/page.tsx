@@ -767,19 +767,37 @@ function StaffRoster({ stores, campaign }: { stores: Store[]; campaign: PresaleC
   const [goalDrafts, setGoalDrafts] = useState<Record<number, string>>({})
   const [newNames, setNewNames] = useState<Record<number, string>>({})
   const [editing, setEditing] = useState<{ id: number; name: string } | null>(null)
+  // この企画の予約（お勧めしたスタッフごとの予約金額・お渡し済み金額。キャンセル除く、割引後の税込。ヘルプ先の予約も入る）
+  const [orders, setOrders] = useState<{ staff_id: number | null; total_amount: number; delivered_at: string | null }[]>([])
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
-    const [staffResult, goalResult] = await Promise.all([
+    const [staffResult, goalResult, orderResult] = await Promise.all([
       supabase.from('staff').select('*').order('sort_order').order('id'),
       campaign ? supabase.from('presale_staff_goals').select('*').eq('campaign_id', campaign.id) : Promise.resolve({ data: [], error: null }),
+      campaign ? fetchAll((start, end) => supabase.from('presale_orders').select('staff_id, total_amount, delivered_at')
+        .eq('campaign_id', campaign.id).is('cancelled_at', null).order('id').range(start, end)) : Promise.resolve({ data: [], error: null }),
     ])
-    if (staffResult.error || goalResult.error) setError('名簿を読み込めませんでした。')
+    if (staffResult.error || goalResult.error || orderResult.error) setError('名簿を読み込めませんでした。')
+    setOrders((orderResult.data ?? []) as { staff_id: number | null; total_amount: number; delivered_at: string | null }[])
     setStaff((staffResult.data ?? []) as Staff[])
     setGoals(new Map(((goalResult.data ?? []) as StaffGoal[]).map((goal) => [goal.staff_id, goal.goal_amount])))
   }, [campaign])
 
   useEffect(() => { void load() }, [load])
+
+  const results = useMemo(() => {
+    const map = new Map<number, { reserved: number; delivered: number; count: number }>()
+    orders.forEach((order) => {
+      if (order.staff_id === null) return
+      const current = map.get(order.staff_id) ?? { reserved: 0, delivered: 0, count: 0 }
+      current.reserved += order.total_amount
+      current.count += 1
+      if (order.delivered_at) current.delivered += order.total_amount
+      map.set(order.staff_id, current)
+    })
+    return map
+  }, [orders])
 
   async function add(storeId: number) {
     const name = (newNames[storeId] ?? '').trim()
@@ -818,7 +836,7 @@ function StaffRoster({ stores, campaign }: { stores: Store[]; campaign: PresaleC
     <div className="space-y-3">
       <p className="text-xs text-gray-500">
         予約の「担当スタイリスト」「お勧めしたスタッフ」の選択肢です。辞めたスタッフは「外す」にすると選択肢から消えます（過去の予約の名前は残ります）。
-        {campaign ? `目標金額（税込）は「${campaign.name}」の分です。` : '目標金額は企画を作ると入れられます。'}
+        {campaign ? `目標金額（税込）と予約金額は「${campaign.name}」の分です。予約金額はお勧めしたスタッフで集計（キャンセル除く・割引後の税込・ヘルプ先の予約も含む）。` : '目標金額は企画を作ると入れられます。'}
       </p>
       {error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
       <div className="grid gap-3 md:grid-cols-3">
@@ -851,6 +869,21 @@ function StaffRoster({ stores, campaign }: { stores: Store[]; campaign: PresaleC
                       </>
                     )}
                   </div>
+                  {campaign && (() => {
+                    const result = results.get(person.id)
+                    const goal = goals.get(person.id) ?? 0
+                    if (!result && !goal) return null
+                    return (
+                      <div className="mt-1">
+                        <div className="flex flex-wrap items-baseline gap-x-2 text-xs text-gray-600">
+                          <span>予約 <b className="text-blue-700">{yen(result?.reserved ?? 0)}</b>（{result?.count ?? 0}件）</span>
+                          <span className="text-green-700">お渡し済み {yen(result?.delivered ?? 0)}</span>
+                          {goal > 0 && <b className="text-pink-700">{Math.round(((result?.reserved ?? 0) / goal) * 100)}%</b>}
+                        </div>
+                        {goal > 0 && <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-gray-100"><div className="h-full rounded-full bg-pink-500" style={{ width: `${Math.min(100, Math.round(((result?.reserved ?? 0) / goal) * 100))}%` }} /></div>}
+                      </div>
+                    )
+                  })()}
                   {campaign && person.is_active && (
                     <label className="mt-1 flex items-center gap-2 text-xs text-gray-500">
                       目標
