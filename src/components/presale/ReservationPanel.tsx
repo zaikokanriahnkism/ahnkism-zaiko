@@ -615,7 +615,7 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
               </div>
             )
           })}
-          {progress.length === 0 && <p className="py-4 text-center text-sm text-gray-400">スタッフ名簿がありません</p>}
+          {progress.length === 0 && <p className="py-4 text-center text-sm text-gray-400">{staff.length === 0 ? 'スタッフ名簿がありません' : 'この企画の目標がまだ入っていません（本部の「スタッフ名簿と目標」で入れると出ます）'}</p>}
         </div>
       </section>
 
