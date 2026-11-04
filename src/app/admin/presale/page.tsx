@@ -435,7 +435,7 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
               <th className="w-12 px-2 py-2 text-center">対象</th>
               <th className="px-3 py-2 text-left">商品</th>
               <th className="w-28 px-2 py-2 text-center">販売価格（税込）</th>
-              <th className="w-44 px-2 py-2 text-center">割引</th>
+              <th className="w-56 px-2 py-2 text-center">割引</th>
               <th className="w-28 px-2 py-2 text-center">割引後（税込）</th>
               <th className="w-20 px-2 py-2 text-center">まとめ買い対象外</th>
               <th className="w-40 px-2 py-2 text-center">店舗に表示</th>
@@ -491,16 +491,22 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
                       {item ? (
                         <div className="flex items-center gap-1">
                           <div className="flex shrink-0 rounded-lg bg-gray-100 p-0.5">
-                            {(['percent', 'yen'] as DiscountType[]).map((type) => (
+                            {(['percent', 'yen', 'tax_off'] as DiscountType[]).map((type) => (
                               <button key={type} onClick={() => void saveDiscount(product, { discount_type: type })}
-                                className={`rounded-md px-2 py-1 font-bold ${item.discount_type === type ? 'bg-white text-pink-700 shadow-sm' : 'text-gray-500'}`}>{type === 'percent' ? '%' : '円'}</button>
+                                className={`whitespace-nowrap rounded-md px-2 py-1 font-bold ${item.discount_type === type ? 'bg-white text-pink-700 shadow-sm' : 'text-gray-500'}`}>{type === 'percent' ? '%' : type === 'yen' ? '円' : '消費税分'}</button>
                             ))}
                           </div>
-                          <input inputMode="decimal" value={drafts[`v_${product.id}`] ?? String(item.discount_value)}
-                            onChange={(event) => setDrafts((previous) => ({ ...previous, [`v_${product.id}`]: event.target.value }))}
-                            onBlur={() => commitValue(product)} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
-                            className="w-full min-w-0 rounded-lg border border-gray-200 px-2 py-1.5 text-right text-base" />
-                          <span className="shrink-0 text-gray-500">{item.discount_type === 'percent' ? '%オフ' : '円引き'}</span>
+                          {item.discount_type === 'tax_off' ? (
+                            <span className="text-gray-500">オフ（税抜の値段）</span>
+                          ) : (
+                            <>
+                              <input inputMode="decimal" value={drafts[`v_${product.id}`] ?? String(item.discount_value)}
+                                onChange={(event) => setDrafts((previous) => ({ ...previous, [`v_${product.id}`]: event.target.value }))}
+                                onBlur={() => commitValue(product)} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
+                                className="w-full min-w-0 rounded-lg border border-gray-200 px-2 py-1.5 text-right text-base" />
+                              <span className="shrink-0 text-gray-500">{item.discount_type === 'percent' ? '%オフ' : '円引き'}</span>
+                            </>
+                          )}
                         </div>
                       ) : <span className="block text-center text-gray-300">−</span>}
                     </td>

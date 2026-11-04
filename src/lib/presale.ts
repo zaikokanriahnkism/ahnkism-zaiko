@@ -1,6 +1,7 @@
 import { withTax } from '@/lib/tax'
 
-export type DiscountType = 'percent' | 'yen'
+// tax_off：消費税分オフ（税込価格 ÷1.1。機械類など）。商品ごとの割引だけで使う
+export type DiscountType = 'percent' | 'yen' | 'tax_off'
 
 export type PresaleCampaign = {
   id: number
@@ -41,7 +42,7 @@ export type OrderLine = {
   quantity: number
   regular_price: number | null
   unit_price: number | null
-  line_discount_type?: DiscountType | null
+  line_discount_type?: Exclude<DiscountType, 'tax_off'> | null
   line_discount_value?: number | null
   // 発注が必要（店舗の在庫を取り分けるだけで済まない）
   needs_order?: boolean
@@ -81,10 +82,12 @@ export function regularPriceWithTax(salePrice: number | null) {
 export function discountedPrice(regular: number | null, type: DiscountType, value: number) {
   if (regular === null) return null
   if (type === 'percent') return Math.round(regular * (1 - value / 100))
+  if (type === 'tax_off') return Math.round(regular / 1.1)
   return Math.max(0, Math.round(regular - value))
 }
 
 export function discountLabel(type: DiscountType, value: number) {
+  if (type === 'tax_off') return '消費税分オフ'
   if (!value) return '割引なし'
   return type === 'percent' ? `${value}%オフ` : `${Math.round(value).toLocaleString('ja-JP')}円引き`
 }
