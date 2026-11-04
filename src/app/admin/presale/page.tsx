@@ -679,18 +679,18 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
         <table className="w-max min-w-full text-xs">
           <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500">
             <tr>
-              <th rowSpan={2} className="sticky left-0 z-20 w-[150px] min-w-[150px] border-b bg-gray-50 px-2 py-2 text-left">商品</th>
+              <th rowSpan={2} className="sticky left-0 z-20 w-[150px] min-w-[150px] sm:w-[260px] sm:min-w-[260px] border-b bg-gray-50 px-2 py-2 text-left">商品</th>
               <th rowSpan={2} className="border-b bg-pink-50 px-1 py-2 text-center leading-tight text-pink-700">予約<br />合計</th>
               {stores.map((store) => <th key={store.id} colSpan={5} className="border-b border-l-2 border-gray-300 px-1 py-1.5 text-center text-sm font-bold text-gray-700">{store.name}</th>)}
             </tr>
             <tr>
               {stores.map((store) => (
                 <Fragment key={store.id}>
-                  <th className="border-b border-l-2 border-gray-300 px-1 py-1 text-center leading-tight">予約数</th>
-                  <th className="border-b px-1 py-1 text-center leading-tight">お渡し<br />済み</th>
-                  <th className="border-b bg-pink-50 px-1 py-1 text-center leading-tight text-pink-700">先行分</th>
-                  <th className="border-b px-1 py-1 text-center leading-tight">取り置<br />き中</th>
-                  <th className="border-b bg-blue-50 px-1 py-1 text-center leading-tight text-blue-700">現在庫</th>
+                  <th className="whitespace-nowrap border-b border-l-2 border-gray-300 px-1.5 py-1 text-center">予約数</th>
+                  <th className="whitespace-nowrap border-b px-1.5 py-1 text-center">お渡し済み</th>
+                  <th className="whitespace-nowrap border-b bg-pink-50 px-1.5 py-1 text-center text-pink-700">先行分</th>
+                  <th className="whitespace-nowrap border-b px-1.5 py-1 text-center">取り置き中</th>
+                  <th className="whitespace-nowrap border-b bg-blue-50 px-1.5 py-1 text-center text-blue-700">現在庫</th>
                 </Fragment>
               ))}
             </tr>
@@ -713,7 +713,7 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
               const picked = pickGroup === group.dealer && productPick.picked.has(item.product_id)
               return (
                 <tr key={item.product_id} className="border-t border-gray-100">
-                  <td className={`sticky left-0 z-10 w-[150px] min-w-[150px] px-2 py-1.5 ${picked ? 'bg-amber-50' : 'bg-white'}`}>
+                  <td className={`sticky left-0 z-10 w-[150px] min-w-[150px] sm:w-[260px] sm:min-w-[260px] px-2 py-1.5 ${picked ? 'bg-amber-50' : 'bg-white'}`}>
                     {sortMode && (
                       <div className="mb-0.5 flex flex-wrap gap-1">
                         <PickToggle checked={picked} onChange={() => toggleProductPick(group.dealer, item.product_id)} />
