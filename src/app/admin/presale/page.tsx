@@ -655,7 +655,7 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
     const raw = drafts[key]
     if (raw === undefined) return
     const value = parseInt(raw || '0', 10)
-    if (!Number.isFinite(value) || value < 0) { setError('先行分は0以上の数字で入力してください。'); return }
+    if (!Number.isFinite(value) || value < 0) { setError('取り置いた数は0以上の数字で入力してください。'); return }
     setError('')
     const { error: saveError } = await supabase.from('presale_allocations')
       .upsert({ campaign_id: campaign.id, store_id: storeId, product_id: productId, allocated_qty: value }, { onConflict: 'campaign_id,store_id,product_id' })
@@ -666,8 +666,8 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
 
   return (
     <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-      <p className="mb-1 text-xs text-gray-500">入荷したあとで、各店舗の<b>「先行分」</b>に先行予約用として確保した数を入れてください。お渡し済みにすると先行分の残りと在庫が自動で減ります。</p>
-      <p className="mb-1 text-[11px] text-gray-400">残り ＝ 先行分 − お渡し済み（渡済）／通常 ＝ 今の在庫 − 先行分の残り（発注リストもこの通常在庫で計算）。予約合計は発注数の目安です。</p>
+      <p className="mb-1 text-xs text-gray-500">入荷したあとで、各店舗の<b>「取り置いた数」</b>に先行予約用に取っておいた数を入れてください。お渡し済みにすると、取り置き中の数と在庫が自動で減ります。</p>
+      <p className="mb-1 text-[11px] text-gray-400">取り置き中 ＝ 取り置いた数のうち、まだお客様に渡していない数／売っていい数 ＝ お店の在庫 − 取り置き中（発注リストもこの数で計算）。予約合計は発注数の目安です。</p>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <PickModeButton active={sortMode} onChange={(value) => { setSortMode(value); clearPicks() }} />
         <p className="text-[11px] text-amber-700">発注先ごとに分けています。{sortMode ? '「選ぶ」にチェック（何個でも）→ 移したい場所の「ここへ」。商品は同じ発注先の中で動かせます。' : ''}並びは次の企画でもそのまま使います。</p>
@@ -686,11 +686,11 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
             <tr>
               {stores.map((store) => (
                 <Fragment key={store.id}>
-                  <th className="border-b border-l-2 border-gray-300 px-1 py-1 text-center">予約</th>
-                  <th className="border-b px-1 py-1 text-center">渡済</th>
-                  <th className="border-b bg-pink-50 px-1 py-1 text-center text-pink-700">先行分</th>
-                  <th className="border-b px-1 py-1 text-center">残り</th>
-                  <th className="border-b bg-blue-50 px-1 py-1 text-center text-blue-700">通常</th>
+                  <th className="border-b border-l-2 border-gray-300 px-1 py-1 text-center leading-tight">予約<br />数</th>
+                  <th className="border-b px-1 py-1 text-center leading-tight">お渡し<br />済み</th>
+                  <th className="border-b bg-pink-50 px-1 py-1 text-center leading-tight text-pink-700">取り置<br />いた数</th>
+                  <th className="border-b px-1 py-1 text-center leading-tight">取り置<br />き中</th>
+                  <th className="border-b bg-blue-50 px-1 py-1 text-center leading-tight text-blue-700">売って<br />いい数</th>
                 </Fragment>
               ))}
             </tr>
