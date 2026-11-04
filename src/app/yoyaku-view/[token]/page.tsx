@@ -52,17 +52,18 @@ export default function PresaleViewPage() {
   const storeName = useMemo(() => new Map((data?.stores ?? []).map((store) => [store.id, store.name])), [data])
   const campaignOrders = useMemo(() => (data?.orders ?? []).filter((order) => order.campaign_id === campaignId), [campaignId, data])
 
-  // スタッフの目標と予約金額：目標を入れた人だけ。ヘルプで他店で取った予約も本人の実績に入れる
+  // スタッフの目標と予約金額：目標を入れた人と、予約を取った人。ヘルプで他店で取った予約も本人の実績に入れる
   const progress = useMemo(() => {
     if (!data || campaignId === null) return []
-    const goals = data.goals.filter((goal) => goal.campaign_id === campaignId && goal.goal_amount > 0)
-    return goals
-      .map((goal) => {
-        const person = staffMap.get(goal.staff_id)
-        const mine = campaignOrders.filter((order) => !order.cancelled_at && order.staff_id === goal.staff_id)
+    const goalMap = new Map(data.goals.filter((goal) => goal.campaign_id === campaignId && goal.goal_amount > 0).map((goal) => [goal.staff_id, goal.goal_amount]))
+    const ids = new Set([...goalMap.keys(), ...campaignOrders.filter((order) => !order.cancelled_at && order.staff_id !== null).map((order) => order.staff_id as number)])
+    return [...ids]
+      .map((staffId) => {
+        const person = staffMap.get(staffId)
+        const mine = campaignOrders.filter((order) => !order.cancelled_at && order.staff_id === staffId)
         return {
           person,
-          goal: goal.goal_amount,
+          goal: goalMap.get(staffId) ?? 0,
           reserved: mine.reduce((sum, order) => sum + order.total_amount, 0),
           delivered: mine.filter((order) => order.delivered_at).reduce((sum, order) => sum + order.total_amount, 0),
           count: mine.length,
@@ -126,10 +127,10 @@ export default function PresaleViewPage() {
         </div>
 
         <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
-          <h2 className="font-bold text-gray-800">スタッフの目標と予約金額</h2>
-          <p className="text-xs text-gray-400">お勧めしたスタッフで集計（キャンセルを除く・割引後の税込）。目標を入れた人だけ表示しています</p>
+          <h2 className="font-bold text-gray-800">スタッフの予約金額と目標</h2>
+          <p className="text-xs text-gray-400">お勧めしたスタッフで集計（キャンセルを除く・割引後の税込）。予約を取った人と、目標を入れた人を表示しています</p>
           {progress.length === 0 ? (
-            <p className="py-6 text-center text-sm text-gray-400">目標が入っているスタッフはいません</p>
+            <p className="py-6 text-center text-sm text-gray-400">まだ予約も目標もありません</p>
           ) : (
             <ul className="mt-3 space-y-2.5">
               {progress.map((row) => {
@@ -142,14 +143,16 @@ export default function PresaleViewPage() {
                         {storeId === 'all' && <span className="ml-1.5 text-xs font-normal text-gray-400">{storeName.get(row.person!.store_id ?? -1)}</span>}
                       </span>
                       <span className="text-gray-600">
-                        予約 <b className="text-pink-700">{yen(row.reserved)}</b> ／ 目標 {yen(row.goal)}
-                        <span className={`ml-2 font-bold ${rate >= 100 ? 'text-green-700' : 'text-gray-700'}`}>{rate}%</span>
+                        予約 <b className="text-pink-700">{yen(row.reserved)}</b>
+                        {row.goal > 0 && <> ／ 目標 {yen(row.goal)}<span className={`ml-2 font-bold ${rate >= 100 ? 'text-green-700' : 'text-gray-700'}`}>{rate}%</span></>}
                         <span className="ml-2 text-xs text-gray-400">{row.count}件・お渡し済み {yen(row.delivered)}</span>
                       </span>
                     </div>
-                    <div className="mt-1 h-2 overflow-hidden rounded-full bg-gray-100">
-                      <div className={`h-full rounded-full ${rate >= 100 ? 'bg-green-500' : 'bg-pink-500'}`} style={{ width: `${Math.min(100, rate)}%` }} />
-                    </div>
+                    {row.goal > 0 && (
+                      <div className="mt-1 h-2 overflow-hidden rounded-full bg-gray-100">
+                        <div className={`h-full rounded-full ${rate >= 100 ? 'bg-green-500' : 'bg-pink-500'}`} style={{ width: `${Math.min(100, rate)}%` }} />
+                      </div>
+                    )}
                   </li>
                 )
               })}
