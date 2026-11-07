@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { getCurrentProfile } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetchAll'
+import { JOINT_ORDER, jointStoreIds } from '@/lib/presale'
 import { moveBefore, PickBar, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
 
 type Store = { id: number; name: string }
@@ -96,10 +97,15 @@ export default function OrdersPage() {
     setStores(nextStores)
     setStoreId((current) => current ?? nextStores[0]?.id ?? null)
     setCategories((categoryResult.data ?? []) as Category[])
-    setRows((assignmentResult.data ?? []).flatMap((row) => {
+    const nextRows = (assignmentResult.data ?? []).flatMap((row) => {
       const product = Array.isArray(row.products) ? row.products[0] : row.products
       return product ? [{ ...row, product } as OrderRow] : []
-    }))
+    })
+    setRows(nextRows)
+    // まとめて発注する商品（Aujua）は、nit の予約も LABO の取り置きとして数える
+    const joint = jointStoreIds(nextStores)
+    const jointProducts = new Set(nextRows.filter((row) => row.product.dealer === JOINT_ORDER.dealer).map((row) => row.product_id))
+    const holdStore = (storeId: number, productId: number) => joint && jointProducts.has(productId) && joint.includes(storeId) ? joint[0] : storeId
     setSupplierSorts((sortResult.data ?? []) as SupplierSort[])
     const map = new Map<string, number>()
     ;(movementResult.data ?? []).forEach((item) => {
@@ -124,12 +130,12 @@ export default function OrdersPage() {
       const delivered = new Map<string, number>()
       const open = new Map<string, number>()
       ;(allocationResult.data ?? []).forEach((row) => {
-        const key = `${row.store_id}_${row.product_id}`
+        const key = `${holdStore(row.store_id, row.product_id)}_${row.product_id}`
         allocated.set(key, (allocated.get(key) ?? 0) + row.allocated_qty)
       })
       ;(lineResult.data ?? []).forEach((row) => {
         const order = Array.isArray(row.presale_orders) ? row.presale_orders[0] : row.presale_orders
-        const key = `${order.store_id}_${row.product_id}`
+        const key = `${holdStore(order.store_id, row.product_id)}_${row.product_id}`
         const target = order.delivered_at ? delivered : open
         target.set(key, (target.get(key) ?? 0) + row.quantity)
       })

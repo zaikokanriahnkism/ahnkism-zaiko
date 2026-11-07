@@ -25,6 +25,16 @@ export type PresaleItem = {
 
 export type PresaleItemWithProduct = PresaleItem & { brand: string | null; name: string; sale_price: number | null }
 
+// まとめて発注する店舗：この発注先の商品は、本店（LABO）が nit の分もまとめて発注する。
+// 先行予約の先行分・取り置きは最初の店舗にまとめて持ち、予約数・在庫は2店の合計で見る
+export const JOINT_ORDER = { dealer: 'Aujua', storeNames: ['LABO', 'nit'] }
+
+// 2店とも見つかったときだけ [まとめる店舗, 一緒に集計する店舗...] の id を返す
+export function jointStoreIds(stores: { id: number; name: string }[]) {
+  const ids = JOINT_ORDER.storeNames.map((name) => stores.find((store) => store.name === name)?.id)
+  return ids.every((id) => id !== undefined) ? ids as number[] : null
+}
+
 // 美容機器はまとめ買いの個数に数えない（初期値。商品ごとに変えられる）
 export function looksLikeDevice(name: string) {
   return /^(ReFa|ドライヤー|パワーストレート)/.test(name)

@@ -12,7 +12,7 @@ import ItemOrderSettings from './ItemOrderSettings'
 import NeedsOrderList from './NeedsOrderList'
 import { moveBefore, PickBar, PickModeButton, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
 import {
-  discountedPrice, looksLikeDevice, regularPriceWithTax,
+  discountedPrice, JOINT_ORDER, jointStoreIds, looksLikeDevice, regularPriceWithTax,
   type BulkTier, type DiscountType, type PresaleCampaign, type PresaleItem, type Staff, type StaffGoal,
 } from '@/lib/presale'
 
@@ -591,6 +591,9 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
 
   useEffect(() => { void load() }, [load])
 
+  const joint = useMemo(() => jointStoreIds(stores), [stores])
+  const storeNameOf = (id: number) => stores.find((store) => store.id === id)?.name ?? ''
+
   const reservedMap = useMemo(() => {
     const map = new Map<string, { reserved: number; delivered: number }>()
     lines.forEach((line) => {
@@ -656,7 +659,8 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
     if (saveError) setError(`並びを保存できませんでした：${saveError.message}`)
   }
 
-  async function saveAllocation(storeId: number, productId: number) {
+  // others：まとめて発注する商品で、一緒に集計する店舗（先行分はまとめる店舗だけに持つので、ほかは消す）
+  async function saveAllocation(storeId: number, productId: number, others: number[] = []) {
     const key = `${storeId}_${productId}`
     const raw = drafts[key]
     if (raw === undefined) return
@@ -666,7 +670,11 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
     const { error: saveError } = await supabase.from('presale_allocations')
       .upsert({ campaign_id: campaign.id, store_id: storeId, product_id: productId, allocated_qty: value }, { onConflict: 'campaign_id,store_id,product_id' })
     if (saveError) { setError(saveError.message); return }
-    setAllocations((previous) => new Map(previous).set(key, value))
+    if (others.length > 0) {
+      const { error: clearError } = await supabase.from('presale_allocations').delete().eq('campaign_id', campaign.id).eq('product_id', productId).in('store_id', others)
+      if (clearError) { setError(clearError.message); return }
+    }
+    setAllocations((previous) => { const next = new Map(previous).set(key, value); others.forEach((id) => next.delete(`${id}_${productId}`)); return next })
     setDrafts((previous) => { const next = { ...previous }; delete next[key]; return next })
   }
 
@@ -709,6 +717,7 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
                   <div className="sticky left-0 flex w-fit flex-wrap items-center gap-2">
                     <span className="text-sm font-bold text-slate-700">{group.dealer}</span>
                     <span className="text-[11px] text-slate-500">{group.items.length}件</span>
+                    {joint && group.dealer === JOINT_ORDER.dealer && <span className="text-[11px] font-normal text-slate-500">（{joint.map(storeNameOf).join('＋')}でまとめて発注：{storeNameOf(joint[0])}の列に合計を出します）</span>}
                     {sortMode && group.dealer !== NO_DEALER && <PickToggle checked={dealerPick.picked.has(group.dealer)} onChange={() => toggleDealerPick(group.dealer)} label="発注先を選ぶ" />}
                     {sortMode && dealerPick.picked.size > 0 && !dealerPick.picked.has(group.dealer) && <PlaceHere onClick={() => void placeDealers(group.dealer)} />}
                   </div>
@@ -731,21 +740,32 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
                   </td>
                   <td className="bg-pink-50/50 px-1 py-1.5 text-center text-sm font-bold text-pink-700">{totalReserved || '−'}</td>
                   {stores.map((store) => {
+                    // まとめて発注する商品（Aujua）は、LABO の列に LABO＋nit の合計を出し、nit の列はまとめて1つにする
+                    const isJoint = joint !== null && item.dealer === JOINT_ORDER.dealer && joint.includes(store.id)
+                    if (isJoint && store.id !== joint[0]) {
+                      return <td key={store.id} colSpan={5} className="border-l-2 border-gray-300 bg-gray-50 px-1 py-1.5 text-center text-[10px] text-gray-400">{storeNameOf(joint[0])}にまとめて集計</td>
+                    }
+                    const members = isJoint ? joint : [store.id]
                     const key = `${store.id}_${item.product_id}`
-                    const reserved = reservedMap.get(key) ?? { reserved: 0, delivered: 0 }
-                    const allocated = allocations.get(key) ?? 0
+                    const perStore = members.map((id) => reservedMap.get(`${id}_${item.product_id}`) ?? { reserved: 0, delivered: 0 })
+                    const reserved = perStore.reduce((sum, row) => ({ reserved: sum.reserved + row.reserved, delivered: sum.delivered + row.delivered }), { reserved: 0, delivered: 0 })
+                    const allocated = members.reduce((sum, id) => sum + (allocations.get(`${id}_${item.product_id}`) ?? 0), 0)
                     // 先行分の残りは「まだ渡していない予約の数」までにする（当日キャンセルした分は自動で取り置きから外れる）
                     const remaining = Math.min(allocated - reserved.delivered, reserved.reserved - reserved.delivered)
-                    const current = stock.get(key)
+                    const stocks = members.map((id) => stock.get(`${id}_${item.product_id}`)).filter((value): value is number => value !== undefined)
+                    const current = stocks.length === 0 ? undefined : stocks.reduce((sum, value) => sum + value, 0)
                     const normal = current === undefined ? null : current - Math.max(0, remaining)
                     return (
                       <Fragment key={store.id}>
-                        <td className="border-l-2 border-gray-300 px-1 py-1.5 text-center">{reserved.reserved || '−'}</td>
+                        <td className="border-l-2 border-gray-300 px-1 py-1.5 text-center">
+                          {reserved.reserved || '−'}
+                          {isJoint && reserved.reserved > 0 && <div className="whitespace-nowrap text-[9px] text-gray-400">{members.map((id, index) => `${storeNameOf(id)}${perStore[index].reserved}`).join('・')}</div>}
+                        </td>
                         <td className="px-1 py-1.5 text-center text-green-700">{reserved.delivered || '−'}</td>
                         <td className="bg-pink-50/50 px-0.5 py-1">
                           <input inputMode="numeric" value={drafts[key] ?? (allocated ? String(allocated) : '')} placeholder="0"
                             onChange={(event) => setDrafts((previous) => ({ ...previous, [key]: event.target.value }))}
-                            onBlur={() => void saveAllocation(store.id, item.product_id)} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
+                            onBlur={() => void saveAllocation(store.id, item.product_id, isJoint ? members.slice(1) : [])} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
                             className="w-11 rounded-md border border-pink-200 bg-white px-0.5 py-1 text-center text-base" />
                         </td>
                         <td className={`px-1 py-1.5 text-center font-bold ${remaining < 0 ? 'text-red-600' : 'text-gray-700'}`}>{allocated || reserved.delivered ? remaining : '−'}</td>
