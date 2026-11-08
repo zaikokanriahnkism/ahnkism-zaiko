@@ -105,7 +105,8 @@ export default function PresaleAdminPage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl space-y-3 p-4">
+      {/* 集計・先行分の在庫は横に長いので、画面の端から端まで使う */}
+      <div className={`mx-auto space-y-3 p-4 ${tab === 'stock' ? 'max-w-none' : 'max-w-6xl'}`}>
         <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
           <div className="flex flex-wrap items-center gap-2">
             <select value={campaignId ?? ''} onChange={(event) => setCampaignId(Number(event.target.value))}
