@@ -74,6 +74,8 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
   const [orders, setOrders] = useState<PresaleOrder[]>([])
   // 店舗ごとの商品の並び（本部が設定）。設定していない商品は後ろに名前順
   const [itemSort, setItemSort] = useState<ItemSort[]>([])
+  // 店舗の在庫入力の並び（店舗ID_商品ID → 並び順）。並びを決めていない商品はこの順で出す
+  const [inputOrder, setInputOrder] = useState<Map<string, number>>(new Map())
   const [draft, setDraft] = useState<Draft>(emptyDraft(storeId))
   const [filterStore, setFilterStore] = useState<number | 'all'>('all')
   const [search, setSearch] = useState('')
@@ -95,6 +97,7 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
       if (loadError) { setError(loadError.message); return }
       const portal = data as PortalData
       setItems(portal.items.filter((item) => item.campaign_id === campaign.id))
+      setInputOrder(new Map(portal.items.filter((item) => item.input_order != null && storeId !== null).map((item) => [`${storeId}_${item.product_id}`, item.input_order as number])))
       setTiers(portal.tiers.filter((tier) => tier.campaign_id === campaign.id))
       setStaff(portal.staff)
       setOtherStaff(portal.other_staff ?? [])
@@ -105,8 +108,8 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
       setItemSort(portal.item_sort ?? [])
       return
     }
-    const [itemResult, tierResult, staffResult, goalResult, orderResult, lineResult, sortResult, checkpointResult] = await Promise.all([
-      supabase.from('presale_items').select('*, product:products!inner(brand, name, sale_price)').eq('campaign_id', campaign.id),
+    const [itemResult, tierResult, staffResult, goalResult, orderResult, lineResult, sortResult, checkpointResult, inputResult] = await Promise.all([
+      supabase.from('presale_items').select('*, product:products!inner(brand, name, sale_price, category:categories(sort_order))').eq('campaign_id', campaign.id),
       supabase.from('presale_bulk_tiers').select('*').eq('campaign_id', campaign.id),
       supabase.from('staff').select('*').order('sort_order').order('id'),
       supabase.from('presale_staff_goals').select('*').eq('campaign_id', campaign.id),
@@ -115,13 +118,16 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
         .eq('presale_orders.campaign_id', campaign.id).order('id').range(start, end)),
       supabase.from('presale_store_item_sort').select('store_id, product_id, sort_order'),
       supabase.from('presale_order_checkpoints').select('id, campaign_id, store_id, note, created_at').eq('campaign_id', campaign.id).order('created_at'),
+      fetchAll((start, end) => supabase.from('store_products').select('store_id, product_id, sort_order').eq('is_active', true).order('store_id').order('product_id').range(start, end)),
     ])
+    setInputOrder(new Map(((inputResult.data ?? []) as { store_id: number; product_id: number; sort_order: number }[]).map((row) => [`${row.store_id}_${row.product_id}`, row.sort_order])))
     if (itemResult.error || tierResult.error || staffResult.error || goalResult.error || orderResult.error || lineResult.error) {
       setError('データを読み込めませんでした。')
     }
     setItems((itemResult.data ?? []).map((row) => {
       const product = Array.isArray(row.product) ? row.product[0] : row.product
-      return { ...row, brand: product.brand, name: product.name, sale_price: product.sale_price } as PresaleItemWithProduct
+      const category = Array.isArray(product.category) ? product.category[0] : product.category
+      return { ...row, brand: product.brand, name: product.name, sale_price: product.sale_price, category_order: category?.sort_order ?? null } as PresaleItemWithProduct
     }))
     setTiers((tierResult.data ?? []) as BulkTier[])
     setItemSort((sortResult.data ?? []) as ItemSort[])
@@ -140,10 +146,14 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
     const order = new Map(itemSort.filter((row) => row.store_id === draft.store_id).map((row) => [row.product_id, row.sort_order]))
     const LAST = Number.MAX_SAFE_INTEGER
     // 店舗ごとに非表示にした商品は、その店舗の商品選びに出さない
+    // 並びを決めた商品 → 決めていない商品は在庫入力と同じ並び（カテゴリの順 → 在庫入力の順 → 名前順）
+    const input = (productId: number) => inputOrder.get(`${draft.store_id}_${productId}`) ?? LAST
     return items.filter((item) => draft.store_id === null || !(item.hidden_store_ids ?? []).includes(draft.store_id))
       .sort((a, b) => (order.get(a.product_id) ?? LAST) - (order.get(b.product_id) ?? LAST)
+      || (a.category_order ?? LAST) - (b.category_order ?? LAST)
+      || input(a.product_id) - input(b.product_id)
       || `${a.brand ?? ''}${a.name}`.localeCompare(`${b.brand ?? ''}${b.name}`, 'ja', { numeric: true }))
-  }, [draft.store_id, itemSort, items])
+  }, [draft.store_id, inputOrder, itemSort, items])
   // 予約の中の商品は打ち込んだ順（line_no）。以前の予約で順番が残っていないものは、その店舗の商品の並び → 名前順
   const orderedOrders = useMemo(() => {
     const storeRank = new Map(itemSort.map((row) => [`${row.store_id}_${row.product_id}`, row.sort_order]))

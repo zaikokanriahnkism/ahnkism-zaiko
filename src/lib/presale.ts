@@ -23,7 +23,8 @@ export type PresaleItem = {
   hidden_store_ids?: number[]
 }
 
-export type PresaleItemWithProduct = PresaleItem & { brand: string | null; name: string; sale_price: number | null }
+// category_order・input_order：並びを決めていない商品を、在庫入力と同じ並び（カテゴリの順 → 在庫入力の順）で出すため
+export type PresaleItemWithProduct = PresaleItem & { brand: string | null; name: string; sale_price: number | null; category_order?: number | null; input_order?: number | null }
 
 // まとめて発注する店舗：この発注先の商品は、本店（LABO）が nit の分もまとめて発注する。
 // 先行予約の先行分・取り置きは最初の店舗にまとめて持ち、予約数・在庫は2店の合計で見る
