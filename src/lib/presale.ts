@@ -60,6 +60,16 @@ export type OrderLine = {
   reserved_qty?: number | null
   // 打ち込んだ順番（以前の予約は null）
   line_no?: number | null
+  // 用意済み（商品を揃えて取り置いた）。予約ごとにまとめて付け外しする
+  prepared?: boolean
+}
+
+// 予約の用意の状態：all＝全部用意済み、some＝一部だけ（missing が未用意の商品）、none＝まだ
+export function preparedState(lines: OrderLine[]) {
+  const active = lines.filter((line) => line.quantity > 0)
+  const missing = active.filter((line) => !line.prepared)
+  if (active.length > 0 && missing.length === 0) return { state: 'all' as const, missing }
+  return { state: missing.length < active.length ? 'some' as const : 'none' as const, missing }
 }
 
 export type PresaleOrder = {

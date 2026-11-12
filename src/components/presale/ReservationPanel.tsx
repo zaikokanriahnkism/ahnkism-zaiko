@@ -5,12 +5,13 @@ import { supabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetchAll'
 import { yen } from '@/lib/tax'
 import {
-  discountLabel, looksLikeDevice, priceOrder, regularPriceWithTax, todayInTokyo,
+  discountLabel, looksLikeDevice, preparedState, priceOrder, regularPriceWithTax, todayInTokyo,
   type BulkTier, type PortalAccess, type PresaleCampaign, type PresaleItemWithProduct, type PresaleOrder, type Staff, type StaffGoal,
 } from '@/lib/presale'
 
 type Store = { id: number; name: string }
-type DraftLine = { product_id: string; quantity: string; discount_type: '' | 'percent' | 'yen'; discount_value: string; needs_order?: boolean }
+// prepared・prepared_product・prepared_qty：修正前に用意済みだった商品と数（同じ商品で数を増やしていなければ用意済みのまま）
+type DraftLine = { product_id: string; quantity: string; discount_type: '' | 'percent' | 'yen'; discount_value: string; needs_order?: boolean; prepared?: boolean; prepared_product?: string; prepared_qty?: number }
 type Draft = {
   id: string | null
   store_id: number | null
@@ -79,6 +80,7 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
   // 予約の各行の商品検索（行番号ごと）
   const [lineSearch, setLineSearch] = useState<Record<number, string>>({})
   const [onlyOpen, setOnlyOpen] = useState(false)
+  const [onlyUnprepared, setOnlyUnprepared] = useState(false)
   // 一覧にない商品（臨時）の入力。line は入れる行（null は行を足して入れる）
   const [tempForm, setTempForm] = useState<{ line: number | null; name: string; price: string; device: boolean } | null>(null)
   const [tempSaving, setTempSaving] = useState(false)
@@ -188,6 +190,7 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
       discount_type: line.discount_type || null,
       discount_value: line.discount_type ? Number(line.discount_value || 0) : null,
       needs_order: line.needs_order ?? false,
+      prepared: Boolean(line.prepared) && line.product_id === line.prepared_product && parseInt(line.quantity, 10) <= (line.prepared_qty ?? 0),
     }))
   const estimate = priceOrder(draftLines, itemMap, tiers)
   const sortedTiers = [...tiers].sort((a, b) => a.min_qty - b.min_qty)
@@ -212,6 +215,9 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
         discount_type: line.line_discount_type ?? '',
         discount_value: line.line_discount_value != null ? String(line.line_discount_value) : '',
         needs_order: line.needs_order ?? false,
+        prepared: line.prepared ?? false,
+        prepared_product: String(line.product_id),
+        prepared_qty: line.quantity,
       })),
     })
     setMessage('')
@@ -283,6 +289,15 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
     if (target !== null) setLineSearch((previous) => ({ ...previous, [target]: '' }))
   }
 
+  // 「用意済み」の付け外し（予約の商品まとめて）。一部だけ用意済みのときは、押すと全部用意済みになる
+  async function togglePrepared(order: PresaleOrder) {
+    const value = preparedState(order.lines).state !== 'all'
+    setError('')
+    const { error: rpcError } = await supabase.rpc('set_presale_order_prepared', { p_store_id: order.store_id, ...rpcAccess, p_order_id: order.id, p_value: value })
+    if (rpcError) { setError(rpcError.message); return }
+    setOrders((previous) => previous.map((item) => item.id !== order.id ? item : { ...item, lines: item.lines.map((line) => ({ ...line, prepared: value })) }))
+  }
+
   // 「発注が必要」の付け外し
   async function toggleNeedsOrder(order: PresaleOrder, lineId: string, value: boolean) {
     setError('')
@@ -351,12 +366,13 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
     const rank = (order: PresaleOrder) => (order.cancelled_at ? 2 : order.delivered_at ? 1 : 0)
     return scopedOrders
       .filter((order) => !onlyOpen || (!order.delivered_at && !order.cancelled_at))
+      .filter((order) => !onlyUnprepared || (!order.delivered_at && !order.cancelled_at && preparedState(order.lines).state !== 'all'))
       .filter((order) => !keyword || normalize(`${order.customer_name}${order.note ?? ''}${order.lines.map((line) => { const item = itemMap.get(line.product_id); return item ? `${item.brand ?? ''}${item.name}` : '' }).join('')}`).includes(keyword))
       .sort((a, b) => dividerStore !== null
         ? (a.cancelled_at ? 1 : 0) - (b.cancelled_at ? 1 : 0) || b.created_at.localeCompare(a.created_at)
         : rank(a) - rank(b) || b.reserved_on.localeCompare(a.reserved_on) || b.created_at.localeCompare(a.created_at))
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [itemMap, onlyOpen, scopedOrders, search, storeId, filterStore])
+  }, [itemMap, onlyOpen, onlyUnprepared, scopedOrders, search, storeId, filterStore])
 
   const active = scopedOrders.filter((order) => !order.cancelled_at)
   const totals = {
@@ -639,11 +655,16 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
             <input type="checkbox" checked={onlyOpen} onChange={(event) => setOnlyOpen(event.target.checked)} className="h-4 w-4" />
             まだお渡ししていない予約だけ
           </label>
+          <label className="flex items-center gap-2 rounded-xl bg-gray-50 px-3 py-2 text-sm text-gray-600">
+            <input type="checkbox" checked={onlyUnprepared} onChange={(event) => setOnlyUnprepared(event.target.checked)} className="h-4 w-4" />
+            まだ用意できていない予約だけ
+          </label>
         </div>
         <div className="divide-y divide-gray-100">
           {visible.map((order, index) => {
             const delivered = !!order.delivered_at
             const cancelled = !!order.cancelled_at
+            const prepared = preparedState(order.lines)
             // この予約の上に入れる「発注済み」の区切り（1つ上の予約との間に入った区切り）
             const previous = index > 0 ? visible[index - 1] : null
             const upper = previous && !previous.cancelled_at ? previous.created_at : '9999'
@@ -656,10 +677,18 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
                 </div>
               ))}
               <div className={`flex items-start gap-3 px-2 py-3 ${cancelled ? 'bg-gray-50 opacity-50' : delivered ? 'bg-green-50' : ''}`}>
-                <label className="flex shrink-0 flex-col items-center gap-0.5 pt-0.5 text-[10px] text-gray-500">
-                  <input type="checkbox" checked={delivered} disabled={cancelled || busyId === order.id} onChange={() => void toggleDelivered(order)} className="h-6 w-6 accent-green-600" />
-                  お渡し
-                </label>
+                <div className="flex shrink-0 flex-col items-center gap-2">
+                  {!delivered && !cancelled && (
+                    <label className="flex flex-col items-center gap-0.5 pt-0.5 text-[10px] text-gray-500">
+                      <input type="checkbox" checked={prepared.state === 'all'} onChange={() => void togglePrepared(order)} className="h-6 w-6 accent-blue-600" />
+                      用意済み
+                    </label>
+                  )}
+                  <label className="flex flex-col items-center gap-0.5 pt-0.5 text-[10px] text-gray-500">
+                    <input type="checkbox" checked={delivered} disabled={cancelled || busyId === order.id} onChange={() => void toggleDelivered(order)} className="h-6 w-6 accent-green-600" />
+                    お渡し
+                  </label>
+                </div>
                 <div className="min-w-0 flex-1">
                   <div className="text-[11px] text-gray-400">
                     {order.reserved_on}{storeId === null && `・${storeName.get(order.store_id) ?? ''}`}
@@ -668,6 +697,12 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
                   <div className={`font-bold text-gray-800 ${cancelled ? 'line-through' : ''}`}>
                     {order.customer_name.replace(/\s*様$/, '')} 様
                     {order.applied_percent !== null && <span className="ml-2 rounded bg-pink-100 px-1.5 py-0.5 text-[10px] text-pink-700">まとめ買い{Number(order.applied_percent)}%</span>}
+                    {!delivered && !cancelled && prepared.state === 'all' && <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700">用意済み</span>}
+                    {!delivered && !cancelled && prepared.state === 'some' && (
+                      <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-800">
+                        一部用意済み（未用意：{prepared.missing.map((line) => itemMap.get(line.product_id)?.name ?? '商品').join('、')}）
+                      </span>
+                    )}
                   </div>
                   {order.note && <p className="mt-0.5 whitespace-pre-wrap rounded-md bg-yellow-50 px-2 py-1 text-xs text-yellow-900">メモ：{order.note}</p>}
                   <ul className="mt-0.5 space-y-0.5 text-sm text-gray-700">
@@ -688,6 +723,7 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
                             : <> × {line.quantity}</>}
                           <span className="ml-1 text-xs text-gray-500">{yen(line.unit_price)}</span>
                           {line.line_discount_type && <span className="ml-1 rounded bg-amber-100 px-1 text-[10px] text-amber-700">個別{discountLabel(line.line_discount_type, Number(line.line_discount_value ?? 0))}</span>}
+                          {!delivered && !cancelled && prepared.state === 'some' && !line.prepared && line.quantity > 0 && <span className="ml-1 rounded bg-amber-200 px-1 text-[10px] font-bold text-amber-900">未用意</span>}
                           </span>
                         </li>
                       )

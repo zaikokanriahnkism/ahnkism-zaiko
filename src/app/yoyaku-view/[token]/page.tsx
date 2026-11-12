@@ -22,7 +22,7 @@ type Order = {
   delivered_at: string | null
   cancelled_at: string | null
   note: string | null
-  lines: { product_id: number; quantity: number; reserved_qty?: number | null }[]
+  lines: { product_id: number; quantity: number; reserved_qty?: number | null; prepared?: boolean }[]
 }
 type ViewData = { campaigns: Campaign[]; stores: Store[]; staff: Staff[]; goals: Goal[]; products: Product[]; orders: Order[] }
 
@@ -180,6 +180,10 @@ export default function PresaleViewPage() {
           <ul className="mt-2 divide-y divide-gray-100">
             {listOrders.map((order) => {
               const cancelled = Boolean(order.cancelled_at)
+              // 用意の状態（お渡し前の予約だけ出す）
+              const active = order.lines.filter((line) => line.quantity > 0)
+              const missing = active.filter((line) => !line.prepared)
+              const prepared = cancelled || order.delivered_at || active.length === 0 ? null : missing.length === 0 ? 'all' : missing.length < active.length ? 'some' : null
               return (
                 <li key={order.id} className={`py-2.5 ${cancelled ? 'opacity-50' : ''}`}>
                   <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -189,6 +193,8 @@ export default function PresaleViewPage() {
                   <div className="text-xs text-gray-500">
                     {order.reserved_on.slice(5).replace('-', '/')}・{storeName.get(order.store_id)}・お勧め {staffLabel(order.staff_id)}・担当 {staffLabel(order.stylist_id)}
                     {cancelled ? <span className="ml-1 text-red-500">キャンセル</span> : order.delivered_at ? <span className="ml-1 text-green-700">お渡し済み</span> : <span className="ml-1 text-amber-600">お渡し前</span>}
+                    {prepared === 'all' && <span className="ml-1 rounded bg-blue-100 px-1 text-blue-700">用意済み</span>}
+                    {prepared === 'some' && <span className="ml-1 rounded bg-amber-100 px-1 text-amber-800">一部用意済み</span>}
                   </div>
                   {order.note && <p className="mt-0.5 whitespace-pre-wrap rounded-md bg-yellow-50 px-2 py-1 text-xs text-yellow-900">メモ：{order.note}</p>}
                   <ul className="mt-0.5 text-sm text-gray-700">
@@ -200,6 +206,7 @@ export default function PresaleViewPage() {
                           {line.reserved_qty != null && line.reserved_qty !== line.quantity
                             ? <span className="ml-1">予約{line.reserved_qty} → お渡し{line.quantity}（{line.reserved_qty - line.quantity}個キャンセル）</span>
                             : <> × {line.quantity}</>}
+                          {prepared === 'some' && !line.prepared && line.quantity > 0 && <span className="ml-1 rounded bg-amber-200 px-1 text-[10px] font-bold text-amber-900">未用意</span>}
                         </li>
                       )
                     })}
