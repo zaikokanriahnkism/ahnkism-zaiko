@@ -60,6 +60,8 @@ export default function ReportPage() {
   const [sales, setSales] = useState<Sales[]>([])
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  // その他の経費のうち「材料費に足す」費目の店舗ごとの合計（修理代・その他 業務など）
+  const [materialExtra, setMaterialExtra] = useState<Map<number, number>>(new Map())
   const [error, setError] = useState('')
   const [showMissing, setShowMissing] = useState(false)
 
@@ -170,6 +172,7 @@ export default function ReportPage() {
   }, [byStore, salesMap, stores])
 
   const money = (amount: number) => yen(taxIncluded ? withTax(amount) : amount)
+  const extraTotal = stores.reduce((sum, store) => sum + (materialExtra.get(store.id) ?? 0), 0)
 
   async function saveSales(storeId: number, field: 'treatment_sales' | 'retail_sales') {
     const key = `${storeId}_${field}`
@@ -271,6 +274,8 @@ export default function ReportPage() {
                     <th className="px-3 py-2 text-right">施術売上</th>
                     <th className="px-3 py-2 text-right">材料費</th>
                     <th className="bg-blue-50 px-3 py-2 text-right text-blue-700">材料費率</th>
+                    <th className="px-3 py-2 text-right" title="材料費に、その他の経費のうち「材料費に足す」費目（修理代・その他 業務など）を足した分">材料費＋経費</th>
+                    <th className="bg-indigo-50 px-3 py-2 text-right text-indigo-700">率（経費込み）</th>
                     <th className="px-3 py-2 text-right">店販売上</th>
                     <th className="px-3 py-2 text-right">店販原価</th>
                     <th className="bg-green-50 px-3 py-2 text-right text-green-700">店販原価率</th>
@@ -287,6 +292,8 @@ export default function ReportPage() {
                         <td className="px-3 py-2 text-right">{salesInput(store.id, 'treatment_sales')}</td>
                         <td className="px-3 py-2 text-right font-medium">{money(row.material)}</td>
                         <td className="bg-blue-50/60 px-3 py-2 text-right font-bold text-blue-700">{rate(row.material, storeSales?.treatment_sales ?? null)}</td>
+                        <td className="px-3 py-2 text-right font-medium">{money(row.material + (materialExtra.get(store.id) ?? 0))}</td>
+                        <td className="bg-indigo-50/60 px-3 py-2 text-right font-bold text-indigo-700">{rate(row.material + (materialExtra.get(store.id) ?? 0), storeSales?.treatment_sales ?? null)}</td>
                         <td className="px-3 py-2 text-right">{salesInput(store.id, 'retail_sales')}</td>
                         <td className="px-3 py-2 text-right font-medium">{money(row.retailCost)}</td>
                         <td className="bg-green-50/60 px-3 py-2 text-right font-bold text-green-700">{rate(row.retailCost, storeSales?.retail_sales ?? null)}</td>
@@ -299,6 +306,8 @@ export default function ReportPage() {
                     <td className="px-3 py-2 text-right">{total.hasTreatment ? money(total.treatment) : '−'}</td>
                     <td className="px-3 py-2 text-right">{money(total.material)}</td>
                     <td className="bg-blue-50 px-3 py-2 text-right text-blue-700">{rate(total.material, total.hasTreatment ? total.treatment : null)}</td>
+                    <td className="px-3 py-2 text-right">{money(total.material + extraTotal)}</td>
+                    <td className="bg-indigo-50 px-3 py-2 text-right text-indigo-700">{rate(total.material + extraTotal, total.hasTreatment ? total.treatment : null)}</td>
                     <td className="px-3 py-2 text-right">{total.hasRetail ? money(total.retail) : '−'}</td>
                     <td className="px-3 py-2 text-right">{money(total.retailCost)}</td>
                     <td className="bg-green-50 px-3 py-2 text-right text-green-700">{rate(total.retailCost, total.hasRetail ? total.retail : null)}</td>
@@ -395,7 +404,7 @@ export default function ReportPage() {
         </section>
 
         {!loading && (
-          <OtherExpenses stores={stores} from={from} to={to} taxIncluded={taxIncluded} sales={sales}
+          <OtherExpenses stores={stores} from={from} to={to} taxIncluded={taxIncluded} sales={sales} onMaterialExtra={setMaterialExtra}
             materialByStore={new Map(stores.map((store) => [store.id, byStore.get(store.id)?.material ?? 0]))} />
         )}
 
