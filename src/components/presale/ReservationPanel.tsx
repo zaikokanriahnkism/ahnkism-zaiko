@@ -351,7 +351,7 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
     const rank = (order: PresaleOrder) => (order.cancelled_at ? 2 : order.delivered_at ? 1 : 0)
     return scopedOrders
       .filter((order) => !onlyOpen || (!order.delivered_at && !order.cancelled_at))
-      .filter((order) => !keyword || normalize(`${order.customer_name}${order.note ?? ''}${order.lines.map((line) => itemMap.get(line.product_id)?.name ?? '').join('')}`).includes(keyword))
+      .filter((order) => !keyword || normalize(`${order.customer_name}${order.note ?? ''}${order.lines.map((line) => { const item = itemMap.get(line.product_id); return item ? `${item.brand ?? ''}${item.name}` : '' }).join('')}`).includes(keyword))
       .sort((a, b) => dividerStore !== null
         ? (a.cancelled_at ? 1 : 0) - (b.cancelled_at ? 1 : 0) || b.created_at.localeCompare(a.created_at)
         : rank(a) - rank(b) || b.reserved_on.localeCompare(a.reserved_on) || b.created_at.localeCompare(a.created_at))
