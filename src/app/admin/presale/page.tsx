@@ -19,7 +19,7 @@ import {
 type Store = { id: number; name: string }
 type Category = { id: number; name: string; sort_order: number }
 // presale_campaign_id：予約の画面で追加した臨時の商品（その企画の中だけ）。null は通常の商品
-type RetailProduct = { id: number; category_id: number; brand: string | null; name: string; sale_price: number | null; presale_campaign_id: number | null }
+type RetailProduct = { id: number; category_id: number; brand: string | null; name: string; sale_price: number | null; presale_campaign_id: number | null; cost_price: number | null }
 type Assignment = { store_id: number; product_id: number; sort_order: number }
 type Tab = 'items' | 'order' | 'reservations' | 'needs' | 'stock' | 'staff' | 'access'
 
@@ -184,7 +184,7 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
 
   const load = useCallback(async () => {
     const [productResult, assignmentResult, itemResult, reservationResult] = await Promise.all([
-      fetchAll((start, end) => supabase.from('products').select('id, category_id, brand, name, sale_price, presale_campaign_id')
+      fetchAll((start, end) => supabase.from('products').select('id, category_id, brand, name, sale_price, presale_campaign_id, cost_price')
         .eq('is_active', true).eq('product_type', 'retail').or(`presale_campaign_id.is.null,presale_campaign_id.eq.${campaign.id}`)
         .order('id').range(start, end)),
       fetchAll((start, end) => supabase.from('store_products').select('store_id, product_id, sort_order')
@@ -349,6 +349,22 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
     await load()
   }
 
+  // 臨時の商品の原価（税抜）。お渡ししたとき、月次レポートの店販原価に入る（在庫は動かない）
+  async function saveCost(product: RetailProduct) {
+    const key = `c_${product.id}`
+    const raw = drafts[key]
+    if (raw === undefined) return
+    const trimmed = raw.normalize('NFKC').replace(/[,，¥円\s]/g, '')
+    const value = trimmed === '' ? null : Math.round(Number(trimmed))
+    if (value !== null && (!Number.isFinite(value) || value < 0)) { setError('原価は0以上の数字で入力してください。'); return }
+    setBusy(key)
+    const { error: updateError } = await supabase.from('products').update({ cost_price: value }).eq('id', product.id)
+    setBusy('')
+    if (updateError) { setError(updateError.message); return }
+    setProducts((previous) => previous.map((item) => item.id === product.id ? { ...item, cost_price: value } : item))
+    setDrafts((previous) => { const next = { ...previous }; delete next[key]; return next })
+  }
+
   // 臨時の商品は名前をここで直せる（予約の画面にも直した名前で出る）
   async function saveName(product: RetailProduct) {
     const key = `n_${product.id}`
@@ -480,6 +496,16 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
                           <button onClick={() => void deleteTemp(product)} disabled={busy === `x_${product.id}`}
                             className="rounded border border-red-200 bg-white px-1.5 py-0.5 text-[10px] text-red-600">消す</button>
                         </div>
+                      )}
+                      {product.presale_campaign_id !== null && (
+                        <label className="mt-1 flex items-center gap-1 text-[11px] text-gray-500" title="お渡ししたとき、月次レポートの店販原価に入ります（在庫は動きません）">
+                          原価（税抜）
+                          <input inputMode="numeric" value={drafts[`c_${product.id}`] ?? (product.cost_price === null ? '' : String(product.cost_price))} placeholder="未入力"
+                            onChange={(event) => setDrafts((previous) => ({ ...previous, [`c_${product.id}`]: event.target.value }))}
+                            onBlur={() => void saveCost(product)} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
+                            className={`w-24 rounded-md border px-1.5 py-0.5 text-right text-base ${product.cost_price === null ? 'border-amber-300 bg-amber-50' : 'border-gray-200 bg-white'}`} />
+                          円
+                        </label>
                       )}
                     </td>
                     <td className="px-2 py-1.5">

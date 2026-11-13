@@ -80,7 +80,10 @@ export default function ReportPage() {
     if (!authorized) return
     setLoading(true)
     setError('')
-    const [storeResult, productResult, movementResult, salesResult, genreResult] = await Promise.all([
+    // 臨時の商品（先行予約で追加・在庫を持たない）は、お渡しした日に店販の販売として原価を数える
+    const [year_, month_] = ym.split('-').map(Number)
+    const nextMonth = month_ === 12 ? `${year_ + 1}-01-01` : `${year_}-${String(month_ + 1).padStart(2, '0')}-01`
+    const [storeResult, productResult, movementResult, salesResult, genreResult, tempResult, campaignResult] = await Promise.all([
       supabase.from('stores').select('id, name').order('sort_order'),
       // 停止中の商品にも今月の履歴が残っていることがあるので全件取る
       fetchAll((start, end) => supabase.from('products').select('id, name, brand, cost_price, product_type, usage_only, genre_id')
@@ -89,13 +92,25 @@ export default function ReportPage() {
         .gte('occurred_on', from).lte('occurred_on', to).order('id').range(start, end)),
       supabase.from('monthly_sales').select('store_id, treatment_sales, retail_sales').eq('year_month', ym),
       supabase.from('product_genres').select('id, name, sort_order').order('sort_order').order('id'),
+      fetchAll((start, end) => supabase.from('presale_order_lines')
+        .select('product_id, quantity, presale_orders!inner(store_id, campaign_id, delivered_at, cancelled_at), products!inner(presale_campaign_id)')
+        .not('products.presale_campaign_id', 'is', null).is('presale_orders.cancelled_at', null)
+        .gte('presale_orders.delivered_at', `${from}T00:00:00+09:00`).lt('presale_orders.delivered_at', `${nextMonth}T00:00:00+09:00`)
+        .order('id').range(start, end)),
+      supabase.from('presale_campaigns').select('id').eq('is_test', true),
     ])
     if (storeResult.error || productResult.error || movementResult.error || salesResult.error || genreResult.error) {
       setError('データを読み込めませんでした。')
     }
     setStores((storeResult.data ?? []) as Store[])
     setProducts((productResult.data ?? []) as ReportProduct[])
-    setMovements((movementResult.data ?? []) as Movement[])
+    const testCampaigns = new Set((campaignResult.data ?? []).map((row) => row.id as number))
+    const tempSales: Movement[] = (tempResult.data ?? []).flatMap((row) => {
+      const order = (Array.isArray(row.presale_orders) ? row.presale_orders[0] : row.presale_orders) as { store_id: number; campaign_id: number }
+      if (testCampaigns.has(order.campaign_id) || row.quantity <= 0) return []
+      return [{ store_id: order.store_id, product_id: row.product_id as number, quantity: -(row.quantity as number), movement_type: 'retail_sale' } as Movement]
+    })
+    setMovements([...((movementResult.data ?? []) as Movement[]), ...tempSales])
     setSales((salesResult.data ?? []) as Sales[])
     setGenres((genreResult.data ?? []) as Genre[])
     setDrafts({})
