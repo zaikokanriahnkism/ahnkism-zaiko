@@ -162,6 +162,7 @@ export default function PresaleAdminPage() {
         {tab === 'order' && campaign && <ItemOrderSettings key={campaign.id} campaign={campaign} stores={stores} />}
         {tab === 'items' && campaign && <ItemSettings key={campaign.id} campaign={campaign} categories={categories} stores={stores} />}
         {tab === 'reservations' && campaign && <ReservationPanel key={campaign.id} campaign={campaign} storeId={null} stores={stores} access={null} />}
+        {tab === 'stock' && campaign && <TempItemStatus key={`t_${campaign.id}`} campaign={campaign} stores={stores} />}
         {tab === 'stock' && campaign && <StockSummary key={campaign.id} campaign={campaign} stores={stores} />}
       </div>
     </main>
@@ -567,6 +568,81 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
           </tbody>
         </table>
         {visible.length === 0 && <p className="py-8 text-center text-sm text-gray-400">該当する商品がありません</p>}
+      </div>
+    </section>
+  )
+}
+
+// 臨時の商品（在庫を持たない）の状況：店舗ごとの予約・お渡し済み・まだ渡していない・キャンセルで余った数
+// 臨時の商品は発注先にキャンセルできないので、キャンセルやお渡しで減らした分はお店に残る
+function TempItemStatus({ campaign, stores }: { campaign: PresaleCampaign; stores: Store[] }) {
+  type Line = { product_id: number; quantity: number; reserved_qty: number | null; store_id: number; delivered: boolean; cancelled: boolean; name: string }
+  const [lines, setLines] = useState<Line[]>([])
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    void (async () => {
+      const { data, error: loadError } = await fetchAll((start, end) => supabase.from('presale_order_lines')
+        .select('product_id, quantity, reserved_qty, presale_orders!inner(store_id, campaign_id, delivered_at, cancelled_at), products!inner(name, presale_campaign_id)')
+        .eq('presale_orders.campaign_id', campaign.id).not('products.presale_campaign_id', 'is', null).order('id').range(start, end))
+      if (loadError) { setError('臨時の商品の状況を読み込めませんでした。'); return }
+      setLines((data ?? []).map((row) => {
+        const order = (Array.isArray(row.presale_orders) ? row.presale_orders[0] : row.presale_orders) as { store_id: number; delivered_at: string | null; cancelled_at: string | null }
+        const product = (Array.isArray(row.products) ? row.products[0] : row.products) as { name: string }
+        return { product_id: row.product_id as number, quantity: row.quantity as number, reserved_qty: row.reserved_qty as number | null, store_id: order.store_id,
+          delivered: Boolean(order.delivered_at), cancelled: Boolean(order.cancelled_at), name: product.name }
+      }))
+    })()
+  }, [campaign.id])
+
+  const rows = useMemo(() => {
+    const map = new Map<string, { product_id: number; name: string; store_id: number; reserved: number; delivered: number; waiting: number; leftover: number }>()
+    lines.forEach((line) => {
+      const key = `${line.product_id}_${line.store_id}`
+      const row = map.get(key) ?? { product_id: line.product_id, name: line.name, store_id: line.store_id, reserved: 0, delivered: 0, waiting: 0, leftover: 0 }
+      const reserved = line.reserved_qty ?? line.quantity
+      row.reserved += reserved
+      if (line.cancelled) row.leftover += reserved
+      else if (line.delivered) { row.delivered += line.quantity; row.leftover += reserved - line.quantity }
+      else row.waiting += line.quantity
+      map.set(key, row)
+    })
+    const storeOrder = new Map(stores.map((store, index) => [store.id, index]))
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'ja', { numeric: true }) || (storeOrder.get(a.store_id) ?? 0) - (storeOrder.get(b.store_id) ?? 0))
+  }, [lines, stores])
+
+  if (rows.length === 0 && !error) return null
+  const storeName = (id: number) => stores.find((store) => store.id === id)?.name ?? ''
+  return (
+    <section className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
+      <h2 className="font-bold text-gray-800">臨時の商品の状況</h2>
+      <p className="mt-0.5 text-xs text-gray-500">臨時の商品は在庫を記録しないので、ここで確認します。<b className="text-amber-700">「キャンセルで余った」</b>は、予約のキャンセルや、お渡しで数を減らした分です（お店に残っている数）。</p>
+      {error && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
+      <div className="mt-2 overflow-x-auto">
+        <table className="w-max min-w-full text-sm">
+          <thead className="bg-gray-50 text-xs text-gray-500">
+            <tr>
+              <th className="px-3 py-2 text-left">商品</th>
+              <th className="px-3 py-2 text-left">店舗</th>
+              <th className="px-3 py-2 text-right">予約数</th>
+              <th className="px-3 py-2 text-right text-green-700">お渡し済み</th>
+              <th className="px-3 py-2 text-right">まだ渡していない</th>
+              <th className="bg-amber-50 px-3 py-2 text-right text-amber-800">キャンセルで余った</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={`${row.product_id}_${row.store_id}`} className="border-t border-gray-100">
+                <td className="px-3 py-1.5 font-medium text-gray-700">{row.name}</td>
+                <td className="px-3 py-1.5 text-gray-600">{storeName(row.store_id)}</td>
+                <td className="px-3 py-1.5 text-right">{row.reserved}</td>
+                <td className="px-3 py-1.5 text-right text-green-700">{row.delivered || '−'}</td>
+                <td className="px-3 py-1.5 text-right">{row.waiting || '−'}</td>
+                <td className={`px-3 py-1.5 text-right ${row.leftover > 0 ? 'bg-amber-50 font-bold text-amber-800' : 'text-gray-300'}`}>{row.leftover || '−'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </section>
   )
