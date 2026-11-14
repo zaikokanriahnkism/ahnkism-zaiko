@@ -652,7 +652,9 @@ const NO_DEALER = '発注先なし'
 
 // 集計と先行分の在庫。先行分の残り＝先行分として確保した数−お渡し済み、通常在庫＝今の在庫−先行分の残り
 function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores: Store[] }) {
-  const [items, setItems] = useState<{ product_id: number; brand: string | null; name: string; dealer: string }[]>([])
+  const [items, setItems] = useState<{ product_id: number; brand: string | null; name: string; dealer: string; category_order: number | null }[]>([])
+  // 在庫入力の並び（商品ID → [店舗の順, 在庫入力の順]）。並びを決めていない商品はこの順で出す
+  const [inputOrder, setInputOrder] = useState<Map<number, [number, number]>>(new Map())
   // 並び（本部が「選ぶ → ここへ」で決める。企画をまたいで同じ）
   const [productSort, setProductSort] = useState<Map<number, number>>(new Map())
   const [dealerSort, setDealerSort] = useState<Map<string, number>>(new Map())
@@ -667,8 +669,8 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
   const [error, setError] = useState('')
 
   const load = useCallback(async () => {
-    const [itemResult, lineResult, allocationResult, stockResult, productSortResult, dealerSortResult] = await Promise.all([
-      supabase.from('presale_items').select('product_id, product:products!inner(brand, name, dealer)').eq('campaign_id', campaign.id),
+    const [itemResult, lineResult, allocationResult, stockResult, productSortResult, dealerSortResult, inputResult] = await Promise.all([
+      supabase.from('presale_items').select('product_id, product:products!inner(brand, name, dealer, category:categories(sort_order))').eq('campaign_id', campaign.id),
       fetchAll((start, end) => supabase.from('presale_order_lines')
         .select('product_id, quantity, presale_orders!inner(store_id, campaign_id, cancelled_at, delivered_at)')
         .eq('presale_orders.campaign_id', campaign.id).is('presale_orders.cancelled_at', null).order('id').range(start, end)),
@@ -676,11 +678,22 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
       fetchAll((start, end) => supabase.from('current_store_stock').select('store_id, product_id, current_stock').order('store_id').order('product_id').range(start, end)),
       fetchAll((start, end) => supabase.from('presale_summary_sort').select('product_id, sort_order').order('product_id').range(start, end)),
       supabase.from('presale_summary_dealer_sort').select('dealer, sort_order'),
+      fetchAll((start, end) => supabase.from('store_products').select('store_id, product_id, sort_order').eq('is_active', true).order('store_id').order('product_id').range(start, end)),
     ])
+    // 在庫入力の並びは、先頭の店舗（LABO）にある商品はその順、なければ次の店舗の順
+    const storeIndex = new Map(stores.map((store, index) => [store.id, index]))
+    const nextInput = new Map<number, [number, number]>()
+    ;((inputResult.data ?? []) as { store_id: number; product_id: number; sort_order: number }[]).forEach((row) => {
+      const rank = storeIndex.get(row.store_id) ?? 999
+      const current = nextInput.get(row.product_id)
+      if (!current || rank < current[0]) nextInput.set(row.product_id, [rank, row.sort_order])
+    })
+    setInputOrder(nextInput)
     if (itemResult.error || lineResult.error || allocationResult.error || stockResult.error) setError('データを読み込めませんでした。')
     setItems((itemResult.data ?? []).map((row) => {
-      const product = (Array.isArray(row.product) ? row.product[0] : row.product) as { brand: string | null; name: string; dealer: string | null }
-      return { product_id: row.product_id as number, brand: product.brand, name: product.name, dealer: product.dealer?.trim() || NO_DEALER }
+      const product = (Array.isArray(row.product) ? row.product[0] : row.product) as { brand: string | null; name: string; dealer: string | null; category: { sort_order: number } | { sort_order: number }[] | null }
+      const category = Array.isArray(product.category) ? product.category[0] : product.category
+      return { product_id: row.product_id as number, brand: product.brand, name: product.name, dealer: product.dealer?.trim() || NO_DEALER, category_order: category?.sort_order ?? null }
     }))
     setProductSort(new Map(((productSortResult.data ?? []) as { product_id: number; sort_order: number }[]).map((row) => [row.product_id, row.sort_order])))
     setDealerSort(new Map(((dealerSortResult.data ?? []) as { dealer: string; sort_order: number }[]).map((row) => [row.dealer, row.sort_order])))
@@ -690,7 +703,7 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
     }))
     setAllocations(new Map((allocationResult.data ?? []).map((row) => [`${row.store_id}_${row.product_id}`, row.allocated_qty as number])))
     setStock(new Map(((stockResult.data ?? []) as { store_id: number; product_id: number; current_stock: number }[]).map((row) => [`${row.store_id}_${row.product_id}`, row.current_stock])))
-  }, [campaign.id])
+  }, [campaign.id, stores])
 
   useEffect(() => { void load() }, [load])
 
@@ -718,10 +731,14 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
       || (dealerSort.get(a) ?? LAST) - (dealerSort.get(b) ?? LAST) || a.localeCompare(b, 'ja'))
     return dealers.map((dealer) => ({
       dealer,
+      // 並びを決めた商品 → 決めていない商品は在庫入力と同じ並び（カテゴリの順 → 在庫入力の順 → 名前順）
       items: (byDealer.get(dealer) ?? []).sort((a, b) => (productSort.get(a.product_id) ?? LAST) - (productSort.get(b.product_id) ?? LAST)
+        || (a.category_order ?? LAST) - (b.category_order ?? LAST)
+        || (inputOrder.get(a.product_id)?.[0] ?? LAST) - (inputOrder.get(b.product_id)?.[0] ?? LAST)
+        || (inputOrder.get(a.product_id)?.[1] ?? LAST) - (inputOrder.get(b.product_id)?.[1] ?? LAST)
         || `${a.brand ?? ''}${a.name}`.localeCompare(`${b.brand ?? ''}${b.name}`, 'ja', { numeric: true })),
     }))
-  }, [dealerSort, items, productSort])
+  }, [dealerSort, inputOrder, items, productSort])
 
   function clearPicks() {
     dealerPick.clear()
