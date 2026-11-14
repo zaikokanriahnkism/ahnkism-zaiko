@@ -649,6 +649,8 @@ function TempItemStatus({ campaign, stores }: { campaign: PresaleCampaign; store
 }
 
 const NO_DEALER = '発注先なし'
+// この発注先の商品は、集計の表でいつも在庫入力と同じ並びにする（商品の並べ替えはしない）
+const FIXED_ORDER_DEALER = 'Aujua'
 
 // 集計と先行分の在庫。先行分の残り＝先行分として確保した数−お渡し済み、通常在庫＝今の在庫−先行分の残り
 function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores: Store[] }) {
@@ -732,7 +734,8 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
     return dealers.map((dealer) => ({
       dealer,
       // 並びを決めた商品 → 決めていない商品は在庫入力と同じ並び（カテゴリの順 → 在庫入力の順 → 名前順）
-      items: (byDealer.get(dealer) ?? []).sort((a, b) => (productSort.get(a.product_id) ?? LAST) - (productSort.get(b.product_id) ?? LAST)
+      // Aujua はいつも在庫入力と同じ並び（並べ替えた順番は使わない）
+      items: (byDealer.get(dealer) ?? []).sort((a, b) => (dealer === FIXED_ORDER_DEALER ? 0 : (productSort.get(a.product_id) ?? LAST) - (productSort.get(b.product_id) ?? LAST))
         || (a.category_order ?? LAST) - (b.category_order ?? LAST)
         || (inputOrder.get(a.product_id)?.[0] ?? LAST) - (inputOrder.get(b.product_id)?.[0] ?? LAST)
         || (inputOrder.get(a.product_id)?.[1] ?? LAST) - (inputOrder.get(b.product_id)?.[1] ?? LAST)
@@ -849,7 +852,7 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
               return (
                 <tr key={item.product_id} className="border-t border-gray-100">
                   <td className={`sticky left-0 z-10 w-[150px] min-w-[150px] sm:w-[260px] sm:min-w-[260px] px-2 py-1.5 ${picked ? 'bg-amber-50' : 'bg-white'}`}>
-                    {sortMode && (
+                    {sortMode && group.dealer !== FIXED_ORDER_DEALER && (
                       <div className="mb-0.5 flex flex-wrap gap-1">
                         <PickToggle checked={picked} onChange={() => toggleProductPick(group.dealer, item.product_id)} />
                         {pickGroup === group.dealer && productPick.picked.size > 0 && !picked && <PlaceHere onClick={() => void placeProducts(item.product_id)} />}
