@@ -814,7 +814,8 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
       {error && <p className="mb-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
       <div className="max-h-[70vh] overflow-auto rounded-xl border border-gray-100">
         <table className="w-max min-w-full text-xs">
-          <thead className="sticky top-0 z-10 bg-gray-50 text-gray-500">
+          {/* 見出しは、縦にスクロールしても左に固定した商品の列より手前に出す */}
+          <thead className="sticky top-0 z-30 bg-gray-50 text-gray-500">
             <tr>
               <th rowSpan={2} className="sticky left-0 z-20 w-[150px] min-w-[150px] sm:w-[260px] sm:min-w-[260px] border-b bg-gray-50 px-2 py-2 text-left">商品</th>
               <th rowSpan={2} className="border-b bg-pink-50 px-1 py-2 text-center leading-tight text-pink-700">予約<br />合計</th>
