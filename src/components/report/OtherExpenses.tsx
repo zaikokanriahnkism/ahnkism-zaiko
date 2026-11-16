@@ -6,7 +6,8 @@ import { withTax, withoutTax, yen } from '@/lib/tax'
 
 type Store = { id: number; name: string }
 // include_in_material：店舗別の表で、この費目を材料費に足して見る（修理代・その他 業務など）
-type Category = { id: number; name: string; sort_order: number; include_in_material: boolean }
+// include_in_retail：店舗別の表で、この費目を店販原価に足して見る（その他 店販など）
+type Category = { id: number; name: string; sort_order: number; include_in_material: boolean; include_in_retail: boolean }
 type Expense = { id: string; store_id: number; spent_on: string; category_id: number; amount: number; note: string | null }
 type Sales = { store_id: number; treatment_sales: number | null; retail_sales: number | null }
 
@@ -17,7 +18,7 @@ function rate(numerator: number, denominator: number | null) {
 
 // 月次レポート：材料費以外の経費（修繕費など）。店舗ごとに1件ずつ記録し、費目×店舗で集計する。
 // 経費合計 ＝ 材料費 ＋ その他の経費。割合は売上合計（施術＋店販）に対して
-export default function OtherExpenses({ stores, from, to, taxIncluded, sales, materialByStore, onMaterialExtra }: {
+export default function OtherExpenses({ stores, from, to, taxIncluded, sales, materialByStore, onMaterialExtra, onRetailExtra }: {
   stores: Store[]
   from: string
   to: string
@@ -26,6 +27,8 @@ export default function OtherExpenses({ stores, from, to, taxIncluded, sales, ma
   materialByStore: Map<number, number>
   // 材料費に足して見る費目の、店舗ごとの合計（店舗別の表の「材料費（経費込み）」に使う）
   onMaterialExtra?: (byStore: Map<number, number>) => void
+  // 店販原価に足して見る費目の、店舗ごとの合計（店舗別の表の「店販原価＋経費」に使う）
+  onRetailExtra?: (byStore: Map<number, number>) => void
 }) {
   const [categories, setCategories] = useState<Category[]>([])
   const [expenses, setExpenses] = useState<Expense[]>([])
@@ -52,7 +55,7 @@ export default function OtherExpenses({ stores, from, to, taxIncluded, sales, ma
 
   const load = useCallback(async () => {
     const [categoryResult, expenseResult] = await Promise.all([
-      supabase.from('expense_categories').select('id, name, sort_order, include_in_material').order('sort_order').order('id'),
+      supabase.from('expense_categories').select('id, name, sort_order, include_in_material, include_in_retail').order('sort_order').order('id'),
       supabase.from('monthly_expenses').select('id, store_id, spent_on, category_id, amount, note').gte('spent_on', from).lte('spent_on', to).order('spent_on').order('created_at'),
     ])
     if (categoryResult.error || expenseResult.error) { setError('経費を読み込めませんでした。'); return }
@@ -69,10 +72,17 @@ export default function OtherExpenses({ stores, from, to, taxIncluded, sales, ma
     const map = new Map<number, number>()
     expenses.filter((expense) => included.has(expense.category_id)).forEach((expense) => map.set(expense.store_id, (map.get(expense.store_id) ?? 0) + expense.amount))
     onMaterialExtra?.(map)
-  }, [categories, expenses, onMaterialExtra])
+    const retail = new Set(categories.filter((category) => category.include_in_retail).map((category) => category.id))
+    const retailMap = new Map<number, number>()
+    expenses.filter((expense) => retail.has(expense.category_id)).forEach((expense) => retailMap.set(expense.store_id, (retailMap.get(expense.store_id) ?? 0) + expense.amount))
+    onRetailExtra?.(retailMap)
+  }, [categories, expenses, onMaterialExtra, onRetailExtra])
 
-  async function toggleIncluded(category: Category) {
-    const { error: updateError } = await supabase.from('expense_categories').update({ include_in_material: !category.include_in_material }).eq('id', category.id)
+  // 材料費・店販原価のどちらに足すか（両方に足すと二重になるので、片方を付けたらもう片方は外す）
+  async function toggleIncluded(category: Category, field: 'include_in_material' | 'include_in_retail') {
+    const value = !category[field]
+    const patch = field === 'include_in_material' ? { include_in_material: value, ...(value ? { include_in_retail: false } : {}) } : { include_in_retail: value, ...(value ? { include_in_material: false } : {}) }
+    const { error: updateError } = await supabase.from('expense_categories').update(patch).eq('id', category.id)
     if (updateError) { setError(`変更できませんでした：${updateError.message}`); return }
     await load()
   }
@@ -198,8 +208,12 @@ export default function OtherExpenses({ stores, from, to, taxIncluded, sales, ma
               <li key={category.id} className="flex items-center gap-1 rounded-full border border-gray-200 bg-white px-3 py-1 text-sm">
                 {category.name}
                 <label className="ml-1 flex items-center gap-0.5 text-[11px] text-gray-500" title="店舗別の表で、材料費に足して見る">
-                  <input type="checkbox" checked={category.include_in_material} onChange={() => void toggleIncluded(category)} className="h-3.5 w-3.5" />
+                  <input type="checkbox" checked={category.include_in_material} onChange={() => void toggleIncluded(category, 'include_in_material')} className="h-3.5 w-3.5" />
                   材料費に足す
+                </label>
+                <label className="flex items-center gap-0.5 text-[11px] text-gray-500" title="店舗別の表で、店販原価に足して見る">
+                  <input type="checkbox" checked={category.include_in_retail} onChange={() => void toggleIncluded(category, 'include_in_retail')} className="h-3.5 w-3.5" />
+                  店販原価に足す
                 </label>
                 <button onClick={() => void renameCategory(category)} className="ml-1 text-xs text-blue-600">名前変更</button>
                 <button onClick={() => void removeCategory(category)} className="text-xs text-red-500">削除</button>
