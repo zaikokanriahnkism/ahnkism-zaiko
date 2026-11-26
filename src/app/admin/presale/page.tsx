@@ -578,10 +578,14 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
 function TempItemStatus({ campaign, stores }: { campaign: PresaleCampaign; stores: Store[] }) {
   type Line = { product_id: number; quantity: number; reserved_qty: number | null; store_id: number; delivered: boolean; cancelled: boolean; name: string }
   const [lines, setLines] = useState<Line[]>([])
+  // 発注した数（集計の表の「先行分」に入れた数）：商品ID_店舗ID → 数
+  const [ordered, setOrdered] = useState<Map<string, number>>(new Map())
   const [error, setError] = useState('')
 
   useEffect(() => {
     void (async () => {
+      const { data: allocationData } = await supabase.from('presale_allocations').select('store_id, product_id, allocated_qty').eq('campaign_id', campaign.id)
+      setOrdered(new Map(((allocationData ?? []) as { store_id: number; product_id: number; allocated_qty: number }[]).map((row) => [`${row.product_id}_${row.store_id}`, row.allocated_qty])))
       const { data, error: loadError } = await fetchAll((start, end) => supabase.from('presale_order_lines')
         .select('product_id, quantity, reserved_qty, presale_orders!inner(store_id, campaign_id, delivered_at, cancelled_at), products!inner(name, presale_campaign_id)')
         .eq('presale_orders.campaign_id', campaign.id).not('products.presale_campaign_id', 'is', null).order('id').range(start, end))
@@ -616,7 +620,7 @@ function TempItemStatus({ campaign, stores }: { campaign: PresaleCampaign; store
   return (
     <section className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
       <h2 className="font-bold text-gray-800">臨時の商品の状況</h2>
-      <p className="mt-0.5 text-xs text-gray-500">臨時の商品は在庫を記録しないので、ここで確認します。<b className="text-amber-700">「キャンセルで余った」</b>は、予約のキャンセルや、お渡しで数を減らした分です（お店に残っている数）。</p>
+      <p className="mt-0.5 text-xs text-gray-500">臨時の商品は在庫を記録しないので、ここで確認します。「発注した数」は、下の表の「先行分」に入れた数です。<b className="text-amber-700">「キャンセルで余った」</b>は、予約のキャンセルや、お渡しで数を減らした分です（お店に残っている数）。</p>
       {error && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
       <div className="mt-2 overflow-x-auto">
         <table className="w-max min-w-full text-sm">
@@ -625,6 +629,7 @@ function TempItemStatus({ campaign, stores }: { campaign: PresaleCampaign; store
               <th className="px-3 py-2 text-left">商品</th>
               <th className="px-3 py-2 text-left">店舗</th>
               <th className="px-3 py-2 text-right">予約数</th>
+              <th className="px-3 py-2 text-right">発注した数</th>
               <th className="px-3 py-2 text-right text-green-700">お渡し済み</th>
               <th className="px-3 py-2 text-right">まだ渡していない</th>
               <th className="bg-amber-50 px-3 py-2 text-right text-amber-800">キャンセルで余った</th>
@@ -636,6 +641,11 @@ function TempItemStatus({ campaign, stores }: { campaign: PresaleCampaign; store
                 <td className="px-3 py-1.5 font-medium text-gray-700">{row.name}</td>
                 <td className="px-3 py-1.5 text-gray-600">{storeName(row.store_id)}</td>
                 <td className="px-3 py-1.5 text-right">{row.reserved}</td>
+                {(() => {
+                  const count = ordered.get(`${row.product_id}_${row.store_id}`) ?? 0
+                  const active = row.reserved - row.leftover
+                  return <td className={`px-3 py-1.5 text-right ${count < active ? 'font-bold text-red-600' : ''}`}>{count || '−'}{count < active && <span className="ml-1 text-[10px]">（未発注 {active - count}）</span>}</td>
+                })()}
                 <td className="px-3 py-1.5 text-right text-green-700">{row.delivered || '−'}</td>
                 <td className="px-3 py-1.5 text-right">{row.waiting || '−'}</td>
                 <td className={`px-3 py-1.5 text-right ${row.leftover > 0 ? 'bg-amber-50 font-bold text-amber-800' : 'text-gray-300'}`}>{row.leftover || '−'}</td>
@@ -654,7 +664,8 @@ const FIXED_ORDER_DEALER = 'Aujua'
 
 // 集計と先行分の在庫。先行分の残り＝先行分として確保した数−お渡し済み、通常在庫＝今の在庫−先行分の残り
 function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores: Store[] }) {
-  const [items, setItems] = useState<{ product_id: number; brand: string | null; name: string; dealer: string; category_order: number | null }[]>([])
+  // temp：臨時の商品（在庫を持たない）。「先行分」に発注した数を入れ、現在庫の列に発注の状況を出す
+  const [items, setItems] = useState<{ product_id: number; brand: string | null; name: string; dealer: string; category_order: number | null; temp: boolean }[]>([])
   // 在庫入力の並び（商品ID → [店舗の順, 在庫入力の順]）。並びを決めていない商品はこの順で出す
   const [inputOrder, setInputOrder] = useState<Map<number, [number, number]>>(new Map())
   // 並び（本部が「選ぶ → ここへ」で決める。企画をまたいで同じ）
@@ -672,7 +683,7 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
 
   const load = useCallback(async () => {
     const [itemResult, lineResult, allocationResult, stockResult, productSortResult, dealerSortResult, inputResult] = await Promise.all([
-      supabase.from('presale_items').select('product_id, product:products!inner(brand, name, dealer, category:categories(sort_order))').eq('campaign_id', campaign.id),
+      supabase.from('presale_items').select('product_id, product:products!inner(brand, name, dealer, presale_campaign_id, category:categories(sort_order))').eq('campaign_id', campaign.id),
       fetchAll((start, end) => supabase.from('presale_order_lines')
         .select('product_id, quantity, presale_orders!inner(store_id, campaign_id, cancelled_at, delivered_at)')
         .eq('presale_orders.campaign_id', campaign.id).is('presale_orders.cancelled_at', null).order('id').range(start, end)),
@@ -693,9 +704,9 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
     setInputOrder(nextInput)
     if (itemResult.error || lineResult.error || allocationResult.error || stockResult.error) setError('データを読み込めませんでした。')
     setItems((itemResult.data ?? []).map((row) => {
-      const product = (Array.isArray(row.product) ? row.product[0] : row.product) as { brand: string | null; name: string; dealer: string | null; category: { sort_order: number } | { sort_order: number }[] | null }
+      const product = (Array.isArray(row.product) ? row.product[0] : row.product) as { brand: string | null; name: string; dealer: string | null; presale_campaign_id: number | null; category: { sort_order: number } | { sort_order: number }[] | null }
       const category = Array.isArray(product.category) ? product.category[0] : product.category
-      return { product_id: row.product_id as number, brand: product.brand, name: product.name, dealer: product.dealer?.trim() || NO_DEALER, category_order: category?.sort_order ?? null }
+      return { product_id: row.product_id as number, brand: product.brand, name: product.name, dealer: product.dealer?.trim() || NO_DEALER, category_order: category?.sort_order ?? null, temp: product.presale_campaign_id !== null }
     }))
     setProductSort(new Map(((productSortResult.data ?? []) as { product_id: number; sort_order: number }[]).map((row) => [row.product_id, row.sort_order])))
     setDealerSort(new Map(((dealerSortResult.data ?? []) as { dealer: string; sort_order: number }[]).map((row) => [row.dealer, row.sort_order])))
@@ -805,6 +816,7 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
     <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
       <p className="mb-1 text-xs text-gray-500">入荷したあとで、各店舗の<b>「先行分」</b>に先行予約用に取っておいた数を入れてください。お渡し済みにすると、取り置き中の数と在庫が自動で減ります。</p>
       <p className="mb-1 text-[11px] text-gray-400">取り置き中 ＝ 先行分のうち、まだお客様に渡していない数／現在庫 ＝ お店の在庫 − 取り置き中（ふだん売っていい数。発注リストもこの数で計算）。予約合計は発注数の目安です。</p>
+      <p className="mb-1 text-[11px] text-amber-700">臨時の商品は在庫を持たないので、「先行分」に<b>発注した数</b>を入れてください。現在庫の列に「未発注 〇」（あと何個発注が必要か）か「発注済み」が出ます。</p>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <PickModeButton active={sortMode} onChange={(value) => { setSortMode(value); clearPicks() }} />
         <p className="text-[11px] text-amber-700">発注先ごとに分けています。{sortMode ? '「選ぶ」にチェック（何個でも）→ 移したい場所の「ここへ」。商品は同じ発注先の中で動かせます。' : ''}並びは次の企画でもそのまま使います。</p>
@@ -861,6 +873,7 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
                     )}
                     <div className="text-[10px] text-gray-400">{item.brand}</div>
                     <div className="break-words font-medium text-gray-700">{item.name}</div>
+                    {item.temp && <div className="mt-0.5 w-fit rounded bg-amber-100 px-1 text-[10px] font-bold text-amber-800">臨時（先行分に発注した数）</div>}
                   </td>
                   <td className="bg-pink-50/50 px-1 py-1.5 text-center text-sm font-bold text-pink-700">{totalReserved || '−'}</td>
                   {stores.map((store) => {
@@ -893,7 +906,17 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
                             className="w-11 rounded-md border border-pink-200 bg-white px-0.5 py-1 text-center text-base" />
                         </td>
                         <td className={`px-1 py-1.5 text-center font-bold ${remaining < 0 ? 'text-red-600' : 'text-gray-700'}`}>{allocated || reserved.delivered ? remaining : '−'}</td>
-                        <td className={`bg-blue-50/50 px-1 py-1.5 text-center font-bold ${normal === null ? 'text-[10px] font-normal text-gray-400' : normal < 0 ? 'text-red-600' : 'text-blue-700'}`}>{normal === null ? 'なし' : normal}</td>
+                        {item.temp ? (() => {
+                          // 臨時の商品：先行分＝発注した数。予約数に足りない分を「未発注」で出す
+                          const shortage = reserved.reserved - allocated
+                          return (
+                            <td className={`bg-blue-50/50 px-1 py-1.5 text-center text-[10px] font-bold ${shortage > 0 ? 'text-red-600' : allocated > 0 ? 'text-green-700' : 'font-normal text-gray-400'}`}>
+                              {shortage > 0 ? `未発注 ${shortage}` : allocated > 0 ? '発注済み' : '−'}
+                            </td>
+                          )
+                        })() : (
+                          <td className={`bg-blue-50/50 px-1 py-1.5 text-center font-bold ${normal === null ? 'text-[10px] font-normal text-gray-400' : normal < 0 ? 'text-red-600' : 'text-blue-700'}`}>{normal === null ? 'なし' : normal}</td>
+                        )}
                       </Fragment>
                     )
                   })}
