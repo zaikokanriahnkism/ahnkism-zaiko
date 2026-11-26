@@ -42,6 +42,7 @@ type PortalData = {
   other_staff?: (Staff & { store_name: string })[]
   help_orders?: HelpOrder[]
   checkpoints?: Checkpoint[]
+  dealer_sort?: { dealer: string; sort_order: number }[]
 }
 
 // 発注済みの区切り（店舗ごと）。この時刻より後に登録された予約が次の発注リストに入る
@@ -84,6 +85,8 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
   const [onlyOpen, setOnlyOpen] = useState(false)
   const [onlyUnprepared, setOnlyUnprepared] = useState(false)
   const [showItemTotals, setShowItemTotals] = useState(false)
+  // 集計の表の発注先の順（店舗の予約ページの「商品ごとの予約数」で使う）
+  const [dealerSort, setDealerSort] = useState<Map<string, number>>(new Map())
   // 一覧にない商品（臨時）の入力。line は入れる行（null は行を足して入れる）
   const [tempForm, setTempForm] = useState<{ line: number | null; name: string; price: string; device: boolean } | null>(null)
   const [tempSaving, setTempSaving] = useState(false)
@@ -107,6 +110,7 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
       setGoals(portal.goals.filter((goal) => goal.campaign_id === campaign.id))
       setOrders(portal.orders.filter((order) => order.campaign_id === campaign.id))
       setItemSort(portal.item_sort ?? [])
+      setDealerSort(new Map((portal.dealer_sort ?? []).map((row) => [row.dealer, row.sort_order])))
       return
     }
     const [itemResult, tierResult, staffResult, goalResult, orderResult, lineResult, sortResult, checkpointResult, inputResult] = await Promise.all([
@@ -662,12 +666,26 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
               if (order.delivered_at) row.delivered += line.quantity
               totals.set(line.product_id, row)
             }))
-            const rank = new Map(sortedItems.map((item, index) => [item.product_id, index]))
-            const rows = [...totals.entries()].sort((a, b) => (rank.get(a[0]) ?? 1e9) - (rank.get(b[0]) ?? 1e9))
+            // 本部の「集計・先行分の在庫」と同じ順：発注先ごと（発注先なしは最後）→ 並べた順（Aujuaは使わない）→ カテゴリ → 在庫入力の順 → 名前
+            const LAST = Number.MAX_SAFE_INTEGER
+            const NO_DEALER = '発注先なし'
+            const dealerOf = (id: number) => itemMap.get(id)?.dealer?.trim() || NO_DEALER
+            const compare = (a: number, b: number) => {
+              const x = itemMap.get(a), y = itemMap.get(b)
+              const dx = dealerOf(a), dy = dealerOf(b)
+              if (dx !== dy) return Number(dx === NO_DEALER) - Number(dy === NO_DEALER) || (dealerSort.get(dx) ?? LAST) - (dealerSort.get(dy) ?? LAST) || dx.localeCompare(dy, 'ja')
+              return (dx === 'Aujua' ? 0 : (x?.summary_sort ?? LAST) - (y?.summary_sort ?? LAST))
+                || (x?.category_order ?? LAST) - (y?.category_order ?? LAST)
+                || (x?.base_store_rank ?? LAST) - (y?.base_store_rank ?? LAST)
+                || (x?.base_input_order ?? LAST) - (y?.base_input_order ?? LAST)
+                || `${x?.brand ?? ''}${x?.name ?? ''}`.localeCompare(`${y?.brand ?? ''}${y?.name ?? ''}`, 'ja', { numeric: true })
+            }
+            // 予約がある商品だけ
+            const rows = [...totals.entries()].filter(([, row]) => row.reserved > 0).sort((a, b) => compare(a[0], b[0]))
             const sum = rows.reduce((total, [, row]) => ({ reserved: total.reserved + row.reserved, delivered: total.delivered + row.delivered }), { reserved: 0, delivered: 0 })
             return (
               <div className="mt-2 overflow-x-auto">
-                <p className="mb-1 text-[11px] text-gray-400">この店舗の予約の合計です（キャンセルは除く）。「まだ渡していない」は、お渡しで数を減らした分を除きます。</p>
+                <p className="mb-1 text-[11px] text-gray-400">この店舗の予約がある商品だけを、本部の集計の表と同じ順（発注先ごと）で出しています（キャンセルは除く）。</p>
                 <table className="w-full min-w-max text-sm">
                   <thead className="bg-gray-50 text-xs text-gray-500">
                     <tr>
@@ -678,17 +696,22 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
                     </tr>
                   </thead>
                   <tbody>
-                    {rows.map(([productId, row]) => {
+                    {rows.map(([productId, row], index) => {
                       const item = itemMap.get(productId)
+                      const dealer = dealerOf(productId)
+                      const newGroup = index === 0 || dealerOf(rows[index - 1][0]) !== dealer
                       const open = orders.filter((order) => !order.cancelled_at && !order.delivered_at)
                         .reduce((total, order) => total + order.lines.filter((line) => line.product_id === productId).reduce((n, line) => n + line.quantity, 0), 0)
                       return (
-                        <tr key={productId} className="border-t border-gray-100">
+                        <Fragment key={productId}>
+                        {newGroup && <tr className="border-t-2 border-slate-300 bg-slate-100"><td colSpan={4} className="px-2 py-1 text-xs font-bold text-slate-700">{dealer}</td></tr>}
+                        <tr className="border-t border-gray-100">
                           <td className="px-2 py-1.5">{item ? <>{item.brand && <span className="text-gray-400">{item.brand} </span>}{item.name}</> : '（対象外になった商品）'}</td>
                           <td className="px-2 py-1.5 text-right font-bold">{row.reserved}</td>
                           <td className="px-2 py-1.5 text-right text-green-700">{row.delivered || '−'}</td>
                           <td className="px-2 py-1.5 text-right font-bold text-blue-700">{open || '−'}</td>
                         </tr>
+                        </Fragment>
                       )
                     })}
                     {rows.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-sm text-gray-400">予約はまだありません</td></tr>}
