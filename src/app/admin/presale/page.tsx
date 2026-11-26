@@ -33,6 +33,8 @@ export default function PresaleAdminPage() {
   const router = useRouter()
   const [authorized, setAuthorized] = useState(false)
   const [tab, setTab] = useState<Tab>('items')
+  // 臨時の商品の発注数を入れたら、下の集計の表を読み直す
+  const [stockVersion, setStockVersion] = useState(0)
   const [stores, setStores] = useState<Store[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [campaigns, setCampaigns] = useState<PresaleCampaign[]>([])
@@ -162,8 +164,8 @@ export default function PresaleAdminPage() {
         {tab === 'order' && campaign && <ItemOrderSettings key={campaign.id} campaign={campaign} stores={stores} />}
         {tab === 'items' && campaign && <ItemSettings key={campaign.id} campaign={campaign} categories={categories} stores={stores} />}
         {tab === 'reservations' && campaign && <ReservationPanel key={campaign.id} campaign={campaign} storeId={null} stores={stores} access={null} />}
-        {tab === 'stock' && campaign && <TempItemStatus key={`t_${campaign.id}`} campaign={campaign} stores={stores} />}
-        {tab === 'stock' && campaign && <StockSummary key={campaign.id} campaign={campaign} stores={stores} />}
+        {tab === 'stock' && campaign && <TempItemStatus key={`t_${campaign.id}`} campaign={campaign} stores={stores} onSaved={() => setStockVersion((value) => value + 1)} />}
+        {tab === 'stock' && campaign && <StockSummary key={`${campaign.id}_${stockVersion}`} campaign={campaign} stores={stores} />}
       </div>
     </main>
   )
@@ -575,12 +577,29 @@ function ItemSettings({ campaign, categories, stores }: { campaign: PresaleCampa
 
 // 臨時の商品（在庫を持たない）の状況：店舗ごとの予約・お渡し済み・まだ渡していない・キャンセルで余った数
 // 臨時の商品は発注先にキャンセルできないので、キャンセルやお渡しで減らした分はお店に残る
-function TempItemStatus({ campaign, stores }: { campaign: PresaleCampaign; stores: Store[] }) {
+function TempItemStatus({ campaign, stores, onSaved }: { campaign: PresaleCampaign; stores: Store[]; onSaved?: () => void }) {
   type Line = { product_id: number; quantity: number; reserved_qty: number | null; store_id: number; delivered: boolean; cancelled: boolean; name: string }
   const [lines, setLines] = useState<Line[]>([])
   // 発注した数（集計の表の「先行分」に入れた数）：商品ID_店舗ID → 数
   const [ordered, setOrdered] = useState<Map<string, number>>(new Map())
+  const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [error, setError] = useState('')
+
+  // 発注した数を保存する（集計の表の「先行分」と同じところに入る）
+  async function saveOrdered(productId: number, storeId: number) {
+    const key = `${productId}_${storeId}`
+    const raw = drafts[key]
+    if (raw === undefined) return
+    const value = parseInt(raw.normalize('NFKC') || '0', 10)
+    if (!Number.isFinite(value) || value < 0) { setError('発注した数は0以上の数字で入れてください。'); return }
+    setError('')
+    const { error: saveError } = await supabase.from('presale_allocations')
+      .upsert({ campaign_id: campaign.id, store_id: storeId, product_id: productId, allocated_qty: value }, { onConflict: 'campaign_id,store_id,product_id' })
+    if (saveError) { setError(saveError.message); return }
+    setOrdered((previous) => new Map(previous).set(key, value))
+    setDrafts((previous) => { const next = { ...previous }; delete next[key]; return next })
+    onSaved?.()
+  }
 
   useEffect(() => {
     void (async () => {
@@ -620,7 +639,7 @@ function TempItemStatus({ campaign, stores }: { campaign: PresaleCampaign; store
   return (
     <section className="rounded-2xl border border-amber-200 bg-white p-4 shadow-sm">
       <h2 className="font-bold text-gray-800">臨時の商品の状況</h2>
-      <p className="mt-0.5 text-xs text-gray-500">臨時の商品は在庫を記録しないので、ここで確認します。「発注した数」は、下の表の「先行分」に入れた数です。<b className="text-amber-700">「キャンセルで余った」</b>は、予約のキャンセルや、お渡しで数を減らした分です（お店に残っている数）。</p>
+      <p className="mt-0.5 text-xs text-gray-500">臨時の商品は在庫を記録しないので、ここで確認します。<b className="text-pink-700">「発注した数」の欄に、発注した数を入れてください</b>（入れると下の表にも反映されます）。<b className="text-amber-700">「キャンセルで余った」</b>は、予約のキャンセルや、お渡しで数を減らした分です（お店に残っている数）。</p>
       {error && <p className="mt-2 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-600">{error}</p>}
       <div className="mt-2 overflow-x-auto">
         <table className="w-max min-w-full text-sm">
@@ -629,7 +648,7 @@ function TempItemStatus({ campaign, stores }: { campaign: PresaleCampaign; store
               <th className="px-3 py-2 text-left">商品</th>
               <th className="px-3 py-2 text-left">店舗</th>
               <th className="px-3 py-2 text-right">予約数</th>
-              <th className="px-3 py-2 text-right">発注した数</th>
+              <th className="bg-pink-50 px-3 py-2 text-right text-pink-700">発注した数（ここに入れる）</th>
               <th className="px-3 py-2 text-right text-green-700">お渡し済み</th>
               <th className="px-3 py-2 text-right">まだ渡していない</th>
               <th className="bg-amber-50 px-3 py-2 text-right text-amber-800">キャンセルで余った</th>
@@ -642,9 +661,21 @@ function TempItemStatus({ campaign, stores }: { campaign: PresaleCampaign; store
                 <td className="px-3 py-1.5 text-gray-600">{storeName(row.store_id)}</td>
                 <td className="px-3 py-1.5 text-right">{row.reserved}</td>
                 {(() => {
-                  const count = ordered.get(`${row.product_id}_${row.store_id}`) ?? 0
+                  const key = `${row.product_id}_${row.store_id}`
+                  const count = ordered.get(key) ?? 0
                   const active = row.reserved - row.leftover
-                  return <td className={`px-3 py-1.5 text-right ${count < active ? 'font-bold text-red-600' : ''}`}>{count || '−'}{count < active && <span className="ml-1 text-[10px]">（未発注 {active - count}）</span>}</td>
+                  return (
+                    <td className="bg-pink-50/50 px-3 py-1.5 text-right">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {count < active && <span className="text-[10px] font-bold text-red-600">未発注 {active - count}</span>}
+                        {count >= active && count > 0 && <span className="text-[10px] font-bold text-green-700">発注済み</span>}
+                        <input inputMode="numeric" value={drafts[key] ?? (count ? String(count) : '')} placeholder="0"
+                          onChange={(event) => setDrafts((previous) => ({ ...previous, [key]: event.target.value }))}
+                          onBlur={() => void saveOrdered(row.product_id, row.store_id)} onKeyDown={(event) => { if (event.key === 'Enter') (event.target as HTMLInputElement).blur() }}
+                          className="w-14 rounded-md border border-pink-300 bg-white px-1 py-1 text-center text-base" />
+                      </div>
+                    </td>
+                  )
                 })()}
                 <td className="px-3 py-1.5 text-right text-green-700">{row.delivered || '−'}</td>
                 <td className="px-3 py-1.5 text-right">{row.waiting || '−'}</td>
@@ -816,7 +847,7 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
     <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
       <p className="mb-1 text-xs text-gray-500">入荷したあとで、各店舗の<b>「先行分」</b>に先行予約用に取っておいた数を入れてください。お渡し済みにすると、取り置き中の数と在庫が自動で減ります。</p>
       <p className="mb-1 text-[11px] text-gray-400">取り置き中 ＝ 先行分のうち、まだお客様に渡していない数／現在庫 ＝ お店の在庫 − 取り置き中（ふだん売っていい数。発注リストもこの数で計算）。予約合計は発注数の目安です。</p>
-      <p className="mb-1 text-[11px] text-amber-700">臨時の商品は在庫を持たないので、「先行分」に<b>発注した数</b>を入れてください。現在庫の列に「未発注 〇」（あと何個発注が必要か）か「発注済み」が出ます。</p>
+      <p className="mb-1 text-[11px] text-amber-700">「臨時」の商品は在庫を持たないので、発注した数は上の<b>「臨時の商品の状況」</b>の表で入れてください。現在庫の列に「未発注 〇」か「発注済み」が出ます。</p>
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <PickModeButton active={sortMode} onChange={(value) => { setSortMode(value); clearPicks() }} />
         <p className="text-[11px] text-amber-700">発注先ごとに分けています。{sortMode ? '「選ぶ」にチェック（何個でも）→ 移したい場所の「ここへ」。商品は同じ発注先の中で動かせます。' : ''}並びは次の企画でもそのまま使います。</p>
@@ -873,7 +904,7 @@ function StockSummary({ campaign, stores }: { campaign: PresaleCampaign; stores:
                     )}
                     <div className="text-[10px] text-gray-400">{item.brand}</div>
                     <div className="break-words font-medium text-gray-700">{item.name}</div>
-                    {item.temp && <div className="mt-0.5 w-fit rounded bg-amber-100 px-1 text-[10px] font-bold text-amber-800">臨時（先行分に発注した数）</div>}
+                    {item.temp && <span className="mt-0.5 inline-block rounded bg-amber-100 px-1 text-[10px] font-bold text-amber-800">臨時</span>}
                   </td>
                   <td className="bg-pink-50/50 px-1 py-1.5 text-center text-sm font-bold text-pink-700">{totalReserved || '−'}</td>
                   {stores.map((store) => {
