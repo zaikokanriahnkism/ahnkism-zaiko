@@ -83,6 +83,7 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
   const [lineSearch, setLineSearch] = useState<Record<number, string>>({})
   const [onlyOpen, setOnlyOpen] = useState(false)
   const [onlyUnprepared, setOnlyUnprepared] = useState(false)
+  const [showItemTotals, setShowItemTotals] = useState(false)
   // 一覧にない商品（臨時）の入力。line は入れる行（null は行を足して入れる）
   const [tempForm, setTempForm] = useState<{ line: number | null; name: string; price: string; device: boolean } | null>(null)
   const [tempSaving, setTempSaving] = useState(false)
@@ -645,6 +646,69 @@ export default function ReservationPanel({ campaign, storeId, stores, access }: 
           {progress.length === 0 && <p className="py-4 text-center text-sm text-gray-400">{staff.length === 0 ? 'スタッフ名簿がありません' : 'まだ予約も目標もありません'}</p>}
         </div>
       </section>}
+
+      {/* 商品ごとの予約数（店舗の予約ページだけ。本部は「集計・先行分の在庫」で見る） */}
+      {access && (
+        <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+          <button onClick={() => setShowItemTotals((value) => !value)} className="flex w-full items-center justify-between gap-2 text-left">
+            <h2 className="font-bold text-gray-800">商品ごとの予約数</h2>
+            <span className="text-xs text-blue-600">{showItemTotals ? '閉じる ▲' : '開く ▼'}</span>
+          </button>
+          {showItemTotals && (() => {
+            const totals = new Map<number, { reserved: number; delivered: number }>()
+            orders.filter((order) => !order.cancelled_at).forEach((order) => order.lines.forEach((line) => {
+              const row = totals.get(line.product_id) ?? { reserved: 0, delivered: 0 }
+              row.reserved += line.reserved_qty ?? line.quantity
+              if (order.delivered_at) row.delivered += line.quantity
+              totals.set(line.product_id, row)
+            }))
+            const rank = new Map(sortedItems.map((item, index) => [item.product_id, index]))
+            const rows = [...totals.entries()].sort((a, b) => (rank.get(a[0]) ?? 1e9) - (rank.get(b[0]) ?? 1e9))
+            const sum = rows.reduce((total, [, row]) => ({ reserved: total.reserved + row.reserved, delivered: total.delivered + row.delivered }), { reserved: 0, delivered: 0 })
+            return (
+              <div className="mt-2 overflow-x-auto">
+                <p className="mb-1 text-[11px] text-gray-400">この店舗の予約の合計です（キャンセルは除く）。「まだ渡していない」は、お渡しで数を減らした分を除きます。</p>
+                <table className="w-full min-w-max text-sm">
+                  <thead className="bg-gray-50 text-xs text-gray-500">
+                    <tr>
+                      <th className="px-2 py-1.5 text-left">商品</th>
+                      <th className="px-2 py-1.5 text-right">予約数</th>
+                      <th className="px-2 py-1.5 text-right text-green-700">お渡し済み</th>
+                      <th className="px-2 py-1.5 text-right text-blue-700">まだ渡していない</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map(([productId, row]) => {
+                      const item = itemMap.get(productId)
+                      const open = orders.filter((order) => !order.cancelled_at && !order.delivered_at)
+                        .reduce((total, order) => total + order.lines.filter((line) => line.product_id === productId).reduce((n, line) => n + line.quantity, 0), 0)
+                      return (
+                        <tr key={productId} className="border-t border-gray-100">
+                          <td className="px-2 py-1.5">{item ? <>{item.brand && <span className="text-gray-400">{item.brand} </span>}{item.name}</> : '（対象外になった商品）'}</td>
+                          <td className="px-2 py-1.5 text-right font-bold">{row.reserved}</td>
+                          <td className="px-2 py-1.5 text-right text-green-700">{row.delivered || '−'}</td>
+                          <td className="px-2 py-1.5 text-right font-bold text-blue-700">{open || '−'}</td>
+                        </tr>
+                      )
+                    })}
+                    {rows.length === 0 && <tr><td colSpan={4} className="py-6 text-center text-sm text-gray-400">予約はまだありません</td></tr>}
+                  </tbody>
+                  {rows.length > 0 && (
+                    <tfoot>
+                      <tr className="border-t-2 border-gray-300 bg-gray-50 font-bold">
+                        <td className="px-2 py-1.5">合計（{rows.length}品目）</td>
+                        <td className="px-2 py-1.5 text-right">{sum.reserved}</td>
+                        <td className="px-2 py-1.5 text-right text-green-700">{sum.delivered}</td>
+                        <td className="px-2 py-1.5 text-right text-blue-700">{orders.filter((order) => !order.cancelled_at && !order.delivered_at).reduce((total, order) => total + order.lines.reduce((n, line) => n + line.quantity, 0), 0)}</td>
+                      </tr>
+                    </tfoot>
+                  )}
+                </table>
+              </div>
+            )
+          })()}
+        </section>
+      )}
 
       <section className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
