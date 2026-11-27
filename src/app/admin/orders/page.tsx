@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { getCurrentProfile } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetchAll'
-import { JOINT_ORDER, jointStoreIds } from '@/lib/presale'
+import { loadPresaleHeld } from '@/lib/presaleHeld'
 import { moveBefore, PickBar, PickToggle, PlaceHere, usePick } from '@/components/PickMove'
 
 type Store = { id: number; name: string }
@@ -102,10 +102,6 @@ export default function OrdersPage() {
       return product ? [{ ...row, product } as OrderRow] : []
     })
     setRows(nextRows)
-    // まとめて発注する商品（Aujua）は、nit の予約も LABO の取り置きとして数える
-    const joint = jointStoreIds(nextStores)
-    const jointProducts = new Set(nextRows.filter((row) => row.product.dealer === JOINT_ORDER.dealer).map((row) => row.product_id))
-    const holdStore = (storeId: number, productId: number) => joint && jointProducts.has(productId) && joint.includes(storeId) ? joint[0] : storeId
     setSupplierSorts((sortResult.data ?? []) as SupplierSort[])
     const map = new Map<string, number>()
     ;(movementResult.data ?? []).forEach((item) => {
@@ -114,35 +110,8 @@ export default function OrdersPage() {
     })
     setMovementMap(map)
 
-    const { data: activeCampaigns } = await supabase.from('presale_campaigns').select('id').eq('is_active', true).eq('is_test', false)
-    const campaignIds = (activeCampaigns ?? []).map((row) => row.id as number)
-    const held = new Map<string, number>()
-    if (campaignIds.length > 0) {
-      const [allocationResult, lineResult] = await Promise.all([
-        supabase.from('presale_allocations').select('store_id, product_id, allocated_qty').in('campaign_id', campaignIds),
-        fetchAll((start, end) => supabase.from('presale_order_lines')
-          .select('id, product_id, quantity, presale_orders!inner(store_id, campaign_id, delivered_at, cancelled_at)')
-          .in('presale_orders.campaign_id', campaignIds)
-          .is('presale_orders.cancelled_at', null).order('id').range(start, end)),
-      ])
-      // 確保中 ＝ 先行分 − お渡し済み。ただし、まだ渡していない予約の数まで（当日キャンセル分は外れる）
-      const allocated = new Map<string, number>()
-      const delivered = new Map<string, number>()
-      const open = new Map<string, number>()
-      ;(allocationResult.data ?? []).forEach((row) => {
-        const key = `${holdStore(row.store_id, row.product_id)}_${row.product_id}`
-        allocated.set(key, (allocated.get(key) ?? 0) + row.allocated_qty)
-      })
-      ;(lineResult.data ?? []).forEach((row) => {
-        const order = Array.isArray(row.presale_orders) ? row.presale_orders[0] : row.presale_orders
-        const key = `${holdStore(order.store_id, row.product_id)}_${row.product_id}`
-        const target = order.delivered_at ? delivered : open
-        target.set(key, (target.get(key) ?? 0) + row.quantity)
-      })
-      allocated.forEach((value, key) => {
-        held.set(key, Math.max(0, Math.min(value - (delivered.get(key) ?? 0), open.get(key) ?? 0)))
-      })
-    }
+    // 先行予約で取り置いている数は通常販売に使えないので、発注の計算で在庫から除く
+    const held = await loadPresaleHeld(nextStores, new Map(nextRows.map((row) => [row.product_id, row.product.dealer])))
     setPresaleHeld(held)
     setLoading(false)
   }, [authorized])
@@ -407,7 +376,7 @@ export default function OrdersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.map(({ row, stock, order }) => {
+                  {shown.map(({ row, stock, held, order }) => {
                     const index = ids.indexOf(row.product_id)
                     return (
                       <tr key={row.product_id} className={`border-t border-gray-100 ${sorting && order <= 0 ? 'opacity-40' : ''}`}>
@@ -416,7 +385,11 @@ export default function OrdersPage() {
                           <div className="break-words font-medium text-gray-800">{row.product.name}</div>
                         </td>
                         <td className="px-2 py-2 text-center text-gray-500">{row.required_qty}</td>
-                        <td className={`px-2 py-2 text-center ${stock < 0 ? 'text-red-600' : 'text-gray-500'}`}>{stock}</td>
+                        <td className={`px-2 py-2 text-center ${stock < 0 ? 'text-red-600' : 'text-gray-500'}`}>
+                          {stock}
+                          {/* 現在庫は先行予約の取り置き分を除いた数。取り置き分を（先行 〇）で出す */}
+                          {held > 0 && <div className="whitespace-nowrap text-[10px] text-pink-600">（先行 {held}）</div>}
+                        </td>
                         <td className={`px-3 py-2 text-center text-lg font-bold ${order > 0 ? 'bg-orange-50 text-orange-600' : 'text-gray-300'}`}>{order > 0 ? order : 0}</td>
                         {!sorting && (
                           <td className="px-2 py-2 text-center">

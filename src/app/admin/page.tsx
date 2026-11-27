@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { getCurrentProfile } from '@/lib/auth'
 import { supabase } from '@/lib/supabase'
 import { fetchAll } from '@/lib/fetchAll'
+import { loadPresaleHeld } from '@/lib/presaleHeld'
 
 type Store = { id: number; name: string }
 type Category = { id: number; name: string; sort_order: number }
@@ -380,6 +381,8 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
   const [activeSessionIds, setActiveSessionIds] = useState<Set<string>>(new Set())
   const [assignments, setAssignments] = useState<StoreProductSummary[]>([])
   const [movements, setMovements] = useState<MovementSummary[]>([])
+  // 受付中の先行予約で取り置いている数（店舗ID_商品ID → 数）。在庫の横に（先行 〇）で出す
+  const [presaleHeld, setPresaleHeld] = useState<Map<string, number>>(new Map())
   const [selectedView, setSelectedView] = useState<string>('retail')
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -435,6 +438,7 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
     })
     setAssignments(rows)
     setMovements((usageResult.data ?? []) as MovementSummary[])
+    setPresaleHeld(await loadPresaleHeld(stores, new Map(rows.map((row) => [row.product_id, row.product.dealer]))))
     setLoading(false)
   }, [stores, todayText])
 
@@ -647,10 +651,14 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
                         return (
                           <td key={store.id} className={`px-2 py-2 text-center font-medium ${storeStock !== undefined && storeStock < 0 ? 'text-red-600' : 'text-gray-700'}`}>
                             {storeStock ?? '−'}
+                            {(presaleHeld.get(`${store.id}_${item.product.id}`) ?? 0) > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（先行 {presaleHeld.get(`${store.id}_${item.product.id}`)}）</div>}
                           </td>
                         )
                       })}
-                      <td className={`bg-blue-50 px-3 py-2 text-center font-bold ${total < 0 ? 'text-red-600' : 'text-blue-700'}`}>{total}</td>
+                      <td className={`bg-blue-50 px-3 py-2 text-center font-bold ${total < 0 ? 'text-red-600' : 'text-blue-700'}`}>
+                        {total}
+                        {(() => { const heldTotal = stores.reduce((sum, store) => sum + (presaleHeld.get(`${store.id}_${item.product.id}`) ?? 0), 0); return heldTotal > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（先行 {heldTotal}）</div> })()}
+                      </td>
                     </tr>
                   )
                   return rows
@@ -685,10 +693,14 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
                         return (
                           <td key={store.id} className={`px-2 py-2 text-center font-medium ${storeStock !== undefined && storeStock < 0 ? 'text-red-600' : 'text-gray-700'}`}>
                             {storeStock ?? '−'}
+                            {(presaleHeld.get(`${store.id}_${item.product.id}`) ?? 0) > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（先行 {presaleHeld.get(`${store.id}_${item.product.id}`)}）</div>}
                           </td>
                         )
                       })}
-                      <td className={`bg-blue-50 px-3 py-2 text-center font-bold ${total < 0 ? 'text-red-600' : 'text-blue-700'}`}>{total}</td>
+                      <td className={`bg-blue-50 px-3 py-2 text-center font-bold ${total < 0 ? 'text-red-600' : 'text-blue-700'}`}>
+                        {total}
+                        {(() => { const heldTotal = stores.reduce((sum, store) => sum + (presaleHeld.get(`${store.id}_${item.product.id}`) ?? 0), 0); return heldTotal > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（先行 {heldTotal}）</div> })()}
+                      </td>
                     </tr>
                   )
                 })}
@@ -705,7 +717,9 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
               <tbody>
                 {storeRows.flatMap((row, index) => {
                   const stock = currentStock(row)
-                  const shortage = Math.max(0, row.required_qty - stock)
+                  // 先行予約で取り置いている分は通常販売に使えないので、不足は取り置きを除いた在庫で計算する（発注の画面と同じ）
+                  const held = presaleHeld.get(`${row.store_id}_${row.product_id}`) ?? 0
+                  const shortage = Math.max(0, row.required_qty - (stock - held))
                   const editKey = `${row.store_id}_${row.product_id}`
                   const currentSupplier = supplierName(row)
                   const previousRow = storeRows[index - 1]
@@ -731,7 +745,10 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
                   rows.push(
                     <tr key={editKey} className="border-t border-gray-100">
                       <td className="w-[320px] max-w-[320px] px-3 py-2"><div className="text-[10px] text-gray-400">{row.product.brand}</div><div className="break-words font-medium text-gray-700">{row.product.name}</div></td>
-                      <td className={`px-2 py-2 text-center font-bold ${stock < 0 || stock < row.required_qty ? 'text-red-600' : 'text-gray-700'}`}>{stock}</td>
+                      <td className={`px-2 py-2 text-center font-bold ${stock < 0 || stock - held < row.required_qty ? 'text-red-600' : 'text-gray-700'}`}>
+                        {stock}
+                        {held > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（先行 {held}）</div>}
+                      </td>
                       <td className="px-2 py-2 text-center">
                         {editRequiredKey === editKey ? (
                           <input type="number" min="0" value={editRequiredValue} onChange={(event) => setEditRequiredValue(event.target.value)}
