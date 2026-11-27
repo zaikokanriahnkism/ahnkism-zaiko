@@ -50,7 +50,6 @@ export default function OrdersPage() {
   const [supplierSorts, setSupplierSorts] = useState<SupplierSort[]>([])
   const [movementMap, setMovementMap] = useState<Map<string, number>>(new Map())
   // 先行予約で確保中の数（先行分−お渡し済み）。受付中の企画だけ
-  const [presaleHeld, setPresaleHeld] = useState<Map<string, number>>(new Map())
   // 先行予約の、まだお渡ししていない予約の数（店舗ID_商品ID → 数）
   const [presaleOpen, setPresaleOpen] = useState<Map<string, number>>(new Map())
   const [storeId, setStoreId] = useState<number | null>(null)
@@ -113,8 +112,7 @@ export default function OrdersPage() {
     setMovementMap(map)
 
     // 先行予約で取り置いている数は通常販売に使えないので、発注の計算で在庫から除く
-    const { held, open } = await loadPresaleHeld(nextStores, new Map(nextRows.map((row) => [row.product_id, row.product.dealer])))
-    setPresaleHeld(held)
+    const { open } = await loadPresaleHeld(nextStores, new Map(nextRows.map((row) => [row.product_id, row.product.dealer])))
     setPresaleOpen(open)
     setLoading(false)
   }, [authorized])
@@ -129,11 +127,12 @@ export default function OrdersPage() {
   const storeItems = useMemo(() => rows
     .filter((row) => row.store_id === storeId && !row.product.usage_only && !sharedCategoryIds.has(row.product.category_id))
     .map((row) => {
-      // 先行予約で確保している分は通常販売に使えないので、在庫から除いて計算する
-      const held = Math.max(0, presaleHeld.get(`${row.store_id}_${row.product_id}`) ?? 0)
-      const stock = row.opening_stock + (movementMap.get(`${row.store_id}_${row.product_id}`) ?? 0) - held
-      return { row, stock, held, order: row.required_qty - stock }
-    }), [movementMap, presaleHeld, rows, sharedCategoryIds, storeId])
+      // 先行予約でまだお渡ししていない予約の分は通常販売に使えないので、在庫から除いて発注数を計算する
+      // 例：必要数2・在庫2・予約1 → 売っていい数1 → 発注数1。表の「現在庫」はお店にある数のまま出す
+      const reserved = Math.max(0, presaleOpen.get(`${row.store_id}_${row.product_id}`) ?? 0)
+      const stock = row.opening_stock + (movementMap.get(`${row.store_id}_${row.product_id}`) ?? 0)
+      return { row, stock, reserved, order: row.required_qty - (stock - reserved) }
+    }), [movementMap, presaleOpen, rows, sharedCategoryIds, storeId])
 
   // 保存済みの並び順（未設定は後ろ、発注先はあいうえお順・商品はカテゴリ順→入力画面の順）
   const savedSuppliers = useMemo(() => {
@@ -379,7 +378,7 @@ export default function OrdersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.map(({ row, stock, order }) => {
+                  {shown.map(({ row, stock, reserved, order }) => {
                     const index = ids.indexOf(row.product_id)
                     return (
                       <tr key={row.product_id} className={`border-t border-gray-100 ${sorting && order <= 0 ? 'opacity-40' : ''}`}>
@@ -390,8 +389,8 @@ export default function OrdersPage() {
                         <td className="px-2 py-2 text-center text-gray-500">{row.required_qty}</td>
                         <td className={`px-2 py-2 text-center ${stock < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                           {stock}
-                          {/* 先行予約の、まだお渡ししていない予約の数を（予約 〇）で出す */}
-                          {(presaleOpen.get(`${row.store_id}_${row.product_id}`) ?? 0) > 0 && <div className="whitespace-nowrap text-[10px] text-pink-600">（予約 {presaleOpen.get(`${row.store_id}_${row.product_id}`)}）</div>}
+                          {/* 先行予約の、まだお渡ししていない予約の数（発注数はこの分を在庫から引いて計算） */}
+                          {reserved > 0 && <div className="whitespace-nowrap text-[10px] text-pink-600">（予約 {reserved}）</div>}
                         </td>
                         <td className={`px-3 py-2 text-center text-lg font-bold ${order > 0 ? 'bg-orange-50 text-orange-600' : 'text-gray-300'}`}>{order > 0 ? order : 0}</td>
                         {!sorting && (

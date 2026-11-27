@@ -381,8 +381,6 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
   const [activeSessionIds, setActiveSessionIds] = useState<Set<string>>(new Set())
   const [assignments, setAssignments] = useState<StoreProductSummary[]>([])
   const [movements, setMovements] = useState<MovementSummary[]>([])
-  // 受付中の先行予約で取り置いている数（店舗ID_商品ID → 数）。在庫の横に（先行 〇）で出す
-  const [presaleHeld, setPresaleHeld] = useState<Map<string, number>>(new Map())
   // まだお渡ししていない先行予約の数（店舗ID_商品ID → 数）。在庫の横に（予約 〇）で出す
   const [presaleOpen, setPresaleOpen] = useState<Map<string, number>>(new Map())
   const [selectedView, setSelectedView] = useState<string>('retail')
@@ -441,7 +439,6 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
     setAssignments(rows)
     setMovements((usageResult.data ?? []) as MovementSummary[])
     const presale = await loadPresaleHeld(stores, new Map(rows.map((row) => [row.product_id, row.product.dealer])))
-    setPresaleHeld(presale.held)
     setPresaleOpen(presale.open)
     setLoading(false)
   }, [stores, todayText])
@@ -721,8 +718,8 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
               <tbody>
                 {storeRows.flatMap((row, index) => {
                   const stock = currentStock(row)
-                  // 先行予約で取り置いている分は通常販売に使えないので、不足は取り置きを除いた在庫で計算する（発注の画面と同じ）
-                  const held = presaleHeld.get(`${row.store_id}_${row.product_id}`) ?? 0
+                  // 先行予約でまだお渡ししていない予約の分は通常販売に使えないので、不足は予約を除いた在庫で計算する（発注の画面と同じ）
+                  const held = presaleOpen.get(`${row.store_id}_${row.product_id}`) ?? 0
                   const shortage = Math.max(0, row.required_qty - (stock - held))
                   const editKey = `${row.store_id}_${row.product_id}`
                   const currentSupplier = supplierName(row)
