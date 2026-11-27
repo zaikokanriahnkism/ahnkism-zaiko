@@ -51,6 +51,8 @@ export default function OrdersPage() {
   const [movementMap, setMovementMap] = useState<Map<string, number>>(new Map())
   // 先行予約で確保中の数（先行分−お渡し済み）。受付中の企画だけ
   const [presaleHeld, setPresaleHeld] = useState<Map<string, number>>(new Map())
+  // 先行予約の、まだお渡ししていない予約の数（店舗ID_商品ID → 数）
+  const [presaleOpen, setPresaleOpen] = useState<Map<string, number>>(new Map())
   const [storeId, setStoreId] = useState<number | null>(null)
   const [supplier, setSupplier] = useState<string>('all')
   const [loading, setLoading] = useState(true)
@@ -111,8 +113,9 @@ export default function OrdersPage() {
     setMovementMap(map)
 
     // 先行予約で取り置いている数は通常販売に使えないので、発注の計算で在庫から除く
-    const held = await loadPresaleHeld(nextStores, new Map(nextRows.map((row) => [row.product_id, row.product.dealer])))
+    const { held, open } = await loadPresaleHeld(nextStores, new Map(nextRows.map((row) => [row.product_id, row.product.dealer])))
     setPresaleHeld(held)
+    setPresaleOpen(open)
     setLoading(false)
   }, [authorized])
 
@@ -376,7 +379,7 @@ export default function OrdersPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {shown.map(({ row, stock, held, order }) => {
+                  {shown.map(({ row, stock, order }) => {
                     const index = ids.indexOf(row.product_id)
                     return (
                       <tr key={row.product_id} className={`border-t border-gray-100 ${sorting && order <= 0 ? 'opacity-40' : ''}`}>
@@ -387,8 +390,8 @@ export default function OrdersPage() {
                         <td className="px-2 py-2 text-center text-gray-500">{row.required_qty}</td>
                         <td className={`px-2 py-2 text-center ${stock < 0 ? 'text-red-600' : 'text-gray-500'}`}>
                           {stock}
-                          {/* 現在庫は先行予約の取り置き分を除いた数。取り置き分を（先行 〇）で出す */}
-                          {held > 0 && <div className="whitespace-nowrap text-[10px] text-pink-600">（先行 {held}）</div>}
+                          {/* 先行予約の、まだお渡ししていない予約の数を（予約 〇）で出す */}
+                          {(presaleOpen.get(`${row.store_id}_${row.product_id}`) ?? 0) > 0 && <div className="whitespace-nowrap text-[10px] text-pink-600">（予約 {presaleOpen.get(`${row.store_id}_${row.product_id}`)}）</div>}
                         </td>
                         <td className={`px-3 py-2 text-center text-lg font-bold ${order > 0 ? 'bg-orange-50 text-orange-600' : 'text-gray-300'}`}>{order > 0 ? order : 0}</td>
                         {!sorting && (

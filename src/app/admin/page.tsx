@@ -383,6 +383,8 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
   const [movements, setMovements] = useState<MovementSummary[]>([])
   // 受付中の先行予約で取り置いている数（店舗ID_商品ID → 数）。在庫の横に（先行 〇）で出す
   const [presaleHeld, setPresaleHeld] = useState<Map<string, number>>(new Map())
+  // まだお渡ししていない先行予約の数（店舗ID_商品ID → 数）。在庫の横に（予約 〇）で出す
+  const [presaleOpen, setPresaleOpen] = useState<Map<string, number>>(new Map())
   const [selectedView, setSelectedView] = useState<string>('retail')
   const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
@@ -438,7 +440,9 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
     })
     setAssignments(rows)
     setMovements((usageResult.data ?? []) as MovementSummary[])
-    setPresaleHeld(await loadPresaleHeld(stores, new Map(rows.map((row) => [row.product_id, row.product.dealer]))))
+    const presale = await loadPresaleHeld(stores, new Map(rows.map((row) => [row.product_id, row.product.dealer])))
+    setPresaleHeld(presale.held)
+    setPresaleOpen(presale.open)
     setLoading(false)
   }, [stores, todayText])
 
@@ -651,13 +655,13 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
                         return (
                           <td key={store.id} className={`px-2 py-2 text-center font-medium ${storeStock !== undefined && storeStock < 0 ? 'text-red-600' : 'text-gray-700'}`}>
                             {storeStock ?? '−'}
-                            {(presaleHeld.get(`${store.id}_${item.product.id}`) ?? 0) > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（先行 {presaleHeld.get(`${store.id}_${item.product.id}`)}）</div>}
+                            {(presaleOpen.get(`${store.id}_${item.product.id}`) ?? 0) > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（予約 {presaleOpen.get(`${store.id}_${item.product.id}`)}）</div>}
                           </td>
                         )
                       })}
                       <td className={`bg-blue-50 px-3 py-2 text-center font-bold ${total < 0 ? 'text-red-600' : 'text-blue-700'}`}>
                         {total}
-                        {(() => { const heldTotal = stores.reduce((sum, store) => sum + (presaleHeld.get(`${store.id}_${item.product.id}`) ?? 0), 0); return heldTotal > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（先行 {heldTotal}）</div> })()}
+                        {(() => { const openTotal = stores.reduce((sum, store) => sum + (presaleOpen.get(`${store.id}_${item.product.id}`) ?? 0), 0); return openTotal > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（予約 {openTotal}）</div> })()}
                       </td>
                     </tr>
                   )
@@ -693,13 +697,13 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
                         return (
                           <td key={store.id} className={`px-2 py-2 text-center font-medium ${storeStock !== undefined && storeStock < 0 ? 'text-red-600' : 'text-gray-700'}`}>
                             {storeStock ?? '−'}
-                            {(presaleHeld.get(`${store.id}_${item.product.id}`) ?? 0) > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（先行 {presaleHeld.get(`${store.id}_${item.product.id}`)}）</div>}
+                            {(presaleOpen.get(`${store.id}_${item.product.id}`) ?? 0) > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（予約 {presaleOpen.get(`${store.id}_${item.product.id}`)}）</div>}
                           </td>
                         )
                       })}
                       <td className={`bg-blue-50 px-3 py-2 text-center font-bold ${total < 0 ? 'text-red-600' : 'text-blue-700'}`}>
                         {total}
-                        {(() => { const heldTotal = stores.reduce((sum, store) => sum + (presaleHeld.get(`${store.id}_${item.product.id}`) ?? 0), 0); return heldTotal > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（先行 {heldTotal}）</div> })()}
+                        {(() => { const openTotal = stores.reduce((sum, store) => sum + (presaleOpen.get(`${store.id}_${item.product.id}`) ?? 0), 0); return openTotal > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（予約 {openTotal}）</div> })()}
                       </td>
                     </tr>
                   )
@@ -747,7 +751,7 @@ function HqOverview({ stores, categories }: { stores: Store[]; categories: Categ
                       <td className="w-[320px] max-w-[320px] px-3 py-2"><div className="text-[10px] text-gray-400">{row.product.brand}</div><div className="break-words font-medium text-gray-700">{row.product.name}</div></td>
                       <td className={`px-2 py-2 text-center font-bold ${stock < 0 || stock - held < row.required_qty ? 'text-red-600' : 'text-gray-700'}`}>
                         {stock}
-                        {held > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（先行 {held}）</div>}
+                        {(presaleOpen.get(`${row.store_id}_${row.product_id}`) ?? 0) > 0 && <div className="whitespace-nowrap text-[10px] font-normal text-pink-600">（予約 {presaleOpen.get(`${row.store_id}_${row.product_id}`)}）</div>}
                       </td>
                       <td className="px-2 py-2 text-center">
                         {editRequiredKey === editKey ? (
