@@ -258,7 +258,9 @@ export default function ProductManagementPage() {
       category_id: resolvedCategoryId,
       usage_only: editUsageOnly,
     }
-    const { error: updateError } = await supabase.from('products').update(patch).eq('id', product.id)
+    // 店販・全店在庫のカテゴリに移したら店販用にする（先行予約の対象に選べるように。追加したときと同じ）
+    const toRetail = resolvedCategoryId !== product.category_id && isRetailCategory(resolvedCategoryId)
+    const { error: updateError } = await supabase.from('products').update(toRetail ? { ...patch, product_type: 'retail' } : patch).eq('id', product.id)
     setSaving(false)
     if (updateError) {
       setError(updateError.message)
