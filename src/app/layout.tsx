@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
+import UpdateNotice from "@/components/UpdateNotice";
 
 export const metadata: Metadata = {
   title: "アンキシム 在庫管理",
@@ -16,7 +17,7 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja">
-      <body className="bg-gray-50 min-h-[100dvh]">{children}</body>
+      <body className="bg-gray-50 min-h-[100dvh]">{children}<UpdateNotice /></body>
     </html>
   );
 }
